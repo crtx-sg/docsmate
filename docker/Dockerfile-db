@@ -1,0 +1,11 @@
+# Derived from official mysql image (our base image)
+FROM mysql
+# All scripts in docker-entrypoint-initdb.d/ are automatically
+# executed during container startup
+
+COPY ./configurations/db/docsgo.sql /docker-entrypoint-initdb.d/
+
+COPY ./configurations/db/my.cnf /etc/mysql/my.cnf
+
+RUN chmod 600 -R /etc/mysql/my.cnf \
+    && chown mysql:mysql /etc/mysql/my.cnf

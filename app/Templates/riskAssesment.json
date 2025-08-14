@@ -1,0 +1,266 @@
+{
+    "risk-assessment": {
+        "classification": "",
+        "fmea": [
+            {
+                "id": "1",
+                "category": "Severity",
+                "options": [
+                    {
+                        "title": "Critical",
+                        "description": "Life-threatening injury",
+                        "value": "5"
+                    },
+                    {
+                        "title": "Major",
+                        "description": "Severe Long-term injury or impairment requiring additional medical intervention to correct. Injury which requires readmission.",
+                        "value": "4"
+                    },
+                    {
+                        "title": "Serious",
+                        "description": "Short-term injury or impairment requiring additional medical intervention to correct.",
+                        "value": "3"
+                    },
+                    {
+                        "title": "Minor",
+                        "description": "Minor injury requires no medical intervention; slight customer inconvenience; little to no effect on product performance; non-vital product failure.",
+                        "value": "2"
+                    },
+                    {
+                        "title": "Negligible",
+                        "description": "No or negligible effect on patients.",
+                        "value": "1"
+                    }
+                ],
+                "value": ""
+            },
+            {
+                "id": "2",
+                "category": "Occurrence",
+                "options": [
+                    {
+                        "title": "Frequent",
+                        "description": "Occurs in roughly 1 in 50 beds per year or occurs in roughly 1 in 5 customer sites or failure caused by single software event.",
+                        "value": "5"
+                    },
+                    {
+                        "title": "Probable",
+                        "description": "Occurs in roughly 1 in 200 to 1 in 50 beds per year or occurs in roughly 1 in 20 to 1 in 5 customer sites or failure caused by single software event with one cascade events.",
+                        "value": "4"
+                    },
+                    {
+                        "title": "Occasional",
+                        "description": "Occurs in roughly 1 in 800 to 1 in 200 beds per year or occurs in roughly 1 in 80 to 1 in 20 customer sites or failure caused by single software event with two cascade events.",
+                        "value": "3"
+                    },
+                    {
+                        "title": "Remote",
+                        "description": "Occurs in less than 1 in 800 beds per year or occurs in less than 1 in 80 customer sites or failure caused by single software event with three or more cascade events.",
+                        "value": "2"
+                    },
+                    {
+                        "title": "Improbable",
+                        "description": "Occurs in roughly 1 in 50 beds per year or occurs in roughly 1 in 5 customer sites or failure caused by single software event with four or more cascade events.",
+                        "value": "1"
+                    }
+                ],
+                "value": ""
+            },
+            {
+                "id": "3",
+                "category": "RAL",
+                "value": ""
+            }
+        ],
+        "cvss": [
+            {
+                "Exploitability Metrics": [
+                    {
+                        "id": "1",
+                        "metrics": "exploitability",
+                        "category": "Attack Vector",
+                        "options": [
+                            {
+                                "title": "Network",
+                                "description": "A vulnerability exploitable with Network access means the vulnerable component is bound to the network stack and the attacker`s path is through OSI layer 3 (the network layer). Such a vulnerability is often termed `remotely exploitable` and can be thought of as an attack being exploitable one or more network hops away (e.g. across layer 3 boundaries from routers).",
+                                "value": 0.85
+                            },
+                            {
+                                "title": "Adjacent Network",
+                                "description": "A vulnerability exploitable with Adjacent Network access means the vulnerable component is bound to the network stack, however the attack is limited to the same shared physical (e.g. Bluetooth, IEEE 802.11), or logical (e.g. local IP subnet) network, and cannot be performed across an OSI layer 3 boundary (e.g. a router).",
+                                "value": 0.62
+                            },
+                            {
+                                "title": "Local",
+                                "description": "A vulnerability exploitable with Local access means that the vulnerable component is not bound to the network stack, and the attacker`s path is via read/write/execute capabilities. In some cases, the attacker may be logged in locally in order to exploit the vulnerability, or may rely on User Interaction to execute a malicious file.",
+                                "value": 0.55
+                            },
+                            {
+                                "title": "Physical",
+                                "description": "A vulnerability exploitable with Physical access requires the attacker to physically touch or manipulate the vulnerable component, such as attaching an peripheral device to a system.",
+                                "value": 0.2
+                            }
+                        ],
+                        "value": ""
+                    },
+                    {
+                        "id": "2",
+                        "metrics": "exploitability",
+                        "category": "Attack Complexity",
+                        "options": [
+                            {
+                                "title": "Low",
+                                "description": "Specialized access conditions or extenuating circumstances do not exist. An attacker can expect repeatable success against the vulnerable component.",
+                                "value": 0.77
+                            },
+                            {
+                                "title": "High",
+                                "description": "A successful attack depends on conditions beyond the attacker`s control. That is, a successful attack cannot be accomplished at will, but requires the attacker to invest in some measurable amount of effort in preparation or execution against the vulnerable component before a successful attack can be expected.",
+                                "value": 0.44
+                            }
+                        ],
+                        "value": ""
+                    },
+                    {
+                        "id": "3",
+                        "metrics": "exploitability",
+                        "category": "Privileges Required",
+                        "options": [
+                            {
+                                "title": "None",
+                                "description": "The attacker is unauthorized prior to attack, and therefore does not require any access to settings or files to carry out an attack.",
+                                "value": 0.85
+                            },
+                            {
+                                "title": "Low",
+                                "description": "The attacker is authorized with (i.e. requires) privileges that provide basic user capabilities that could normally affect only settings and files owned by a user. Alternatively, an attacker with Low privileges may have the ability to cause an impact only to non-sensitive resources.",
+                                "value": 0.62
+                            },
+                            {
+                                "title": "High",
+                                "description": "The attacker is authorized with (i.e. requires) privileges that provide significant (e.g. administrative) control over the vulnerable component that could affect component-wide settings and files.",
+                                "value": 0.27
+                            }
+                        ],
+                        "value": ""
+                    },
+                    {
+                        "id": "4",
+                        "metrics": "exploitability",
+                        "category": "User Interaction",
+                        "options": [
+                            {
+                                "title": "None",
+                                "description": "The vulnerable system can be exploited without interaction from any user.",
+                                "value": 0.85
+                            },
+                            {
+                                "title": "Required",
+                                "description": "Successful exploitation of this vulnerability requires a user to take some action before the vulnerability can be exploited, such as convincing a user to click a link in an email.",
+                                "value": 0.62
+                            }
+                        ],
+                        "value": ""
+                    },
+                    {
+                        "id": "5",
+                        "metrics": "exploitability",
+                        "category": "Scope",
+                        "options": [
+                            {
+                                "title": "Unchanged",
+                                "description": "An exploited vulnerability can only affect resources managed by the same authority. In this case the vulnerable component and the impacted component are the same.",
+                                "value": 6.42
+                            },
+                            {
+                                "title": "Changed",
+                                "description": "An exploited vulnerability can affect resources beyond the authorization privileges intended by the vulnerable component. In this case the vulnerable component and the impacted component are different.",
+                                "value": 7.52
+                            }
+                        ],
+                        "value": ""
+                    }
+                ],
+                "Impact Metrics": [
+                    {
+                        "id": "1",
+                        "metrics": "impact",
+                        "category": "Confidentiality Impact",
+                        "options": [
+                            {
+                                "title": "None",
+                                "description": "There is no loss of confidentiality within the impacted component.",
+                                "value": 0
+                            },
+                            {
+                                "title": "Low",
+                                "description": "There is some loss of confidentiality. Access to some restricted information is obtained, but the attacker does not have control over what information is obtained, or the amount or kind of loss is constrained. The information disclosure does not cause a direct, serious loss to the impacted component.",
+                                "value": 0.22
+                            },
+                            {
+                                "title": "High",
+                                "description": "There is total loss of confidentiality, resulting in all resources within the impacted component being divulged to the attacker. Alternatively, access to only some restricted information is obtained, but the disclosed information presents a direct, serious impact.",
+                                "value": 0.56
+                            }
+                        ],
+                        "value": ""
+                    },
+                    {
+                        "id": "2",
+                        "metrics": "impact",
+                        "category": "Integrity Impact",
+                        "options": [
+                            {
+                                "title": "None",
+                                "description": "There is no loss of integrity within the impacted component.",
+                                "value": 0
+                            },
+                            {
+                                "title": "Low",
+                                "description": "Modification of data is possible, but the attacker does not have control over the consequence of a modification, or the amount of modification is constrained. The data modification does not have a direct, serious impact on the impacted component.",
+                                "value": 0.22
+                            },
+                            {
+                                "title": "High",
+                                "description": "There is a total loss of integrity, or a complete loss of protection. For example, the attacker is able to modify any/all files protected by the impacted component. Alternatively, only some files can be modified, but malicious modification would present a direct, serious consequence to the impacted component.",
+                                "value": 0.56
+                            }
+                        ],
+                        "value": ""
+                    },
+                    {
+                        "id": "3",
+                        "metrics": "impact",
+                        "category": "Availability Impact",
+                        "options": [
+                            {
+                                "title": "None",
+                                "description": "There is no impact to availability within the impacted component.",
+                                "value": 0
+                            },
+                            {
+                                "title": "Low",
+                                "description": "There is reduced performance or interruptions in resource availability. Even if repeated exploitation of the vulnerability is possible, the attacker does not have the ability to completely deny service to legitimate users. The resources in the impacted component are either partially available all of the time, or fully available only some of the time, but overall there is no direct, serious consequence to the impacted component.",
+                                "value": 0.22
+                            },
+                            {
+                                "title": "High",
+                                "description": "There is total loss of availability, resulting in the attacker being able to fully deny access to resources in the impacted component; this loss is either sustained (while the attacker continues to deliver the attack) or persistent (the condition persists even after the attack has completed). Alternatively, the attacker has the ability to deny some availability, but the loss of availability presents a direct, serious consequence to the impacted component (e.g., the attacker cannot disrupt existing connections, but can prevent new connections; the attacker can repeatedly exploit a vulnerability that, in each instance of a successful attack, leaks a only small amount of memory, but after repeated exploitation causes a service to become completely unavailable).",
+                                "value": 0.56
+                            }
+                        ],
+                        "value": ""
+                    }
+                ],
+                "Score": [
+                    {
+                        "id": "9",
+                        "category": "base_score",
+                        "value": "",
+                        "options": []
+                    }
+                ]
+            }
+        ]
+    }
+}

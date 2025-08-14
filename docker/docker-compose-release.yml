@@ -1,0 +1,26 @@
+version: "3.7"
+services:
+    web:
+      image: docsgo/web
+      volumes:
+            - docsgoPublic:/var/www/html/public
+      ports:
+            - 80:80
+      depends_on:
+            - db  
+
+    db:
+      image: docsgo/mysql
+      volumes:
+            - persistent:/var/lib/mysql
+      environment:
+            MYSQL_DATABASE: docsgo
+            MYSQL_USER: user
+            MYSQL_PASSWORD: docsgo@123
+            MYSQL_ROOT_PASSWORD: docsgo@123 
+      ports:
+            - 3306:3306
+ 
+volumes:
+      persistent:
+      docsgoPublic:
