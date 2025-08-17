@@ -20,29 +20,95 @@ DOCUMENT_TYPES = [
 # --- RISK STATUS OPTIONS ---
 RISK_STATUS_OPTIONS = ["New", "Ignore", "Minor", "Major", "Severe"]
 
-# --- ASIL RATING OPTIONS ---
-ASIL_EXPOSURE = {
-    "E0: Incredibly unlikely": 0,
-    "E1: Very low probability": 1,
-    "E2: Low probability": 2,
-    "E3: Medium probability": 3,
-    "E4: High probability": 4
-}
-
+# --- ASIL (Automotive Safety Integrity Level) CONFIGURATION ---
 ASIL_SEVERITY = {
     "S0: No injuries": 0,
     "S1: Light to moderate injuries": 1,
-    "S2: Severe to life-threatening injuries (survival probable)": 2,
-    "S3: Life-threatening injuries (survival uncertain) to fatal injuries": 3
+    "S2: Severe injuries": 2,
+    "S3: Life-threatening injuries (survival uncertain), fatal injuries": 3
+}
+
+ASIL_EXPOSURE = {
+    "E0: Incredible (probability of exposure is negligible)": 0,
+    "E1: Very low probability (less than 1% of average operating time)": 1,
+    "E2: Low probability (1% to 10% of average operating time)": 2,
+    "E3: Medium probability (10% to 100% of average operating time)": 3,
+    "E4: High probability (more than 100% of average operating time, e.g., always present)": 4
 }
 
 ASIL_CONTROLLABILITY = {
-    "C0: Controllable in general": 0,
-    "C1: Simply controllable": 1,
-    "C2: Normally controllable": 2,
-    "C3: Difficult to control or uncontrollable": 3
+    "C0: Controllable in general (100% of drivers or other traffic participants can usually avoid harm)": 0,
+    "C1: Simply controllable (99% of drivers or other traffic participants can usually avoid harm)": 1,
+    "C2: Normally controllable (90% or more of all drivers or other traffic participants are usually able to avoid harm)": 2,
+    "C3: Difficult to control or uncontrollable (less than 90% of drivers or other traffic participants can usually avoid harm)": 3
 }
 
+ASIL_MAPPING = {
+    "S1": { "E1": { "C1": "QM", "C2": "QM", "C3": "QM" }, "E2": { "C1": "QM", "C2": "QM", "C3": "QM" }, "E3": { "C1": "QM", "C2": "QM", "C3": "A" }, "E4": { "C1": "QM", "C2": "A", "C3": "B" } },
+    "S2": { "E1": { "C1": "QM", "C2": "QM", "C3": "QM" }, "E2": { "C1": "QM", "C2": "QM", "C3": "A" }, "E3": { "C1": "QM", "C2": "A", "C3": "B" }, "E4": { "C1": "A", "C2": "B", "C3": "C" } },
+    "S3": { "E1": { "C1": "QM", "C2": "QM", "C3": "A" }, "E2": { "C1": "QM", "C2": "A", "C3": "B" }, "E3": { "C1": "A", "C2": "B", "C3": "C" }, "E4": { "C1": "B", "C2": "C", "C3": "D" } }
+}
+
+ASIL_RATING_TABLE = {
+    (3+4+3): "D", (3+4+2): "C", (3+4+1): "B",
+    (3+3+3): "C", (3+3+2): "B", (3+3+1): "A",
+    (3+2+3): "B", (3+2+2): "A", (3+2+1): "QM",
+    (3+1+3): "A", (3+1+2): "QM", (3+1+1): "QM",
+
+    (2+4+3): "C", (2+4+2): "B", (2+4+1): "A",
+    (2+3+3): "B", (2+3+2): "A", (2+3+1): "QM",
+    (2+2+3): "A", (2+2+2): "QM", (2+2+1): "QM",
+
+    (1+4+3): "B", (1+4+2): "A", (1+4+1): "QM",
+    (1+3+3): "A", (1+3+2): "QM", (1+3+1): "QM",
+}
+
+# --- SIL (Safety Integrity Level) CONFIGURATION ---
+SIL_CONSEQUENCE = {
+    "C1: Minor injury": 1,
+    "C2: Serious permanent injury to one or more persons; death to one person": 2,
+    "C3: Death to several people": 3,
+    "C4: Very many people killed": 4
+}
+
+SIL_EXPOSURE = {
+    "F1: Rare to more often exposure in the hazardous zone. Exposure time is short": 1,
+    "F2: Frequent to permanent exposure in the hazardous zone": 2
+}
+
+SIL_AVOIDANCE = {
+    "P1: Possible under certain conditions": 1,
+    "P2: Almost impossible": 2
+}
+
+SIL_PROBABILITY = {
+    "W1: A very slight probability that the unwanted occurrence will come to pass and only a few unwanted occurrences are likely": 1,
+    "W2: A slight probability that the unwanted occurrence will come to pass and few unwanted occurrences are likely": 2,
+    "W3: A relatively high probability that the unwanted occurrence will come to pass and several unwanted occurrences are likely": 3
+}
+
+SIL_MAPPING = {
+    "W1": { "C1": { "F1": { "P1": "---", "P2": "---" }, "F2": { "P1": "---", "P2": "a" } }, "C2": { "F1": { "P1": "---", "P2": "a" }, "F2": { "P1": "a", "P2": "1" } }, "C3": { "F1": { "P1": "a", "P2": "1" }, "F2": { "P1": "1", "P2": "2" } }, "C4": { "F1": { "P1": "1", "P2": "2" }, "F2": { "P1": "2", "P2": "3" } } },
+    "W2": { "C1": { "F1": { "P1": "---", "P2": "a" }, "F2": { "P1": "a", "P2": "1" } }, "C2": { "F1": { "P1": "a", "P2": "1" }, "F2": { "P1": "1", "P2": "2" } }, "C3": { "F1": { "P1": "1", "P2": "2" }, "F2": { "P1": "2", "P2": "3" } }, "C4": { "F1": { "P1": "2", "P2": "3" }, "F2": { "P1": "3", "P2": "4" } } },
+    "W3": { "C1": { "F1": { "P1": "a", "P2": "1" }, "F2": { "P1": "1", "P2": "2" } }, "C2": { "F1": { "P1": "1", "P2": "2" }, "F2": { "P1": "2", "P2": "3" } }, "C3": { "F1": { "P1": "2", "P2": "3" }, "F2": { "P1": "3", "P2": "4" } }, "C4": { "F1": { "P1": "3", "P2": "4" }, "F2": { "P1": "4", "P2": "b" } } }
+}
+
+SIL_RATING_TABLE = {
+    (1, 1, 1, 1): "---", (1, 1, 1, 2): "---", (1, 1, 2, 1): "---", (1, 1, 2, 2): "a",
+    (1, 2, 1, 1): "---", (1, 2, 1, 2): "a", (1, 2, 2, 1): "a", (1, 2, 2, 2): "1",
+    (1, 3, 1, 1): "a", (1, 3, 1, 2): "1", (1, 3, 2, 1): "1", (1, 3, 2, 2): "2",
+    (1, 4, 1, 1): "1", (1, 4, 1, 2): "2", (1, 4, 2, 1): "2", (1, 4, 2, 2): "3",
+
+    (2, 1, 1, 1): "---", (2, 1, 1, 2): "a", (2, 1, 2, 1): "a", (2, 1, 2, 2): "1",
+    (2, 2, 1, 1): "a", (2, 2, 1, 2): "1", (2, 2, 2, 1): "1", (2, 2, 2, 2): "2",
+    (2, 3, 1, 1): "1", (2, 3, 1, 2): "2", (2, 3, 2, 1): "2", (2, 3, 2, 2): "3",
+    (2, 4, 1, 1): "2", (2, 4, 1, 2): "3", (2, 4, 2, 1): "3", (2, 4, 2, 2): "4",
+
+    (3, 1, 1, 1): "a", (3, 1, 1, 2): "1", (3, 1, 2, 1): "1", (3, 1, 2, 2): "2",
+    (3, 2, 1, 1): "1", (3, 2, 1, 2): "2", (3, 2, 2, 1): "2", (3, 2, 2, 2): "3",
+    (3, 3, 1, 1): "2", (3, 3, 1, 2): "3", (3, 3, 2, 1): "3", (3, 3, 2, 2): "4",
+    (3, 4, 1, 1): "3", (3, 4, 1, 2): "4", (3, 4, 2, 1): "4", (3, 4, 2, 2): "b",
+}
 
 # --- GENERAL LLM CONFIGURATION ---
 LLM_PROVIDER = 'ollama'

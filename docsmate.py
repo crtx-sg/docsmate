@@ -169,6 +169,13 @@ def init_db():
             FOREIGN KEY(author_id) REFERENCES users(id)
         )
     ''')
+    
+    # ASIL Tables
+    c.execute('''CREATE TABLE IF NOT EXISTS asil_master (id INTEGER PRIMARY KEY, project_id INTEGER, hazard_description TEXT, severity TEXT, exposure TEXT, controllability TEXT, asil_rating TEXT)''')
+    
+    # SIL Tables
+    c.execute('''CREATE TABLE IF NOT EXISTS sil_master (id INTEGER PRIMARY KEY, project_id INTEGER, hazard_description TEXT, consequence TEXT, exposure TEXT, avoidance TEXT, probability TEXT, sil_rating TEXT)''')
+
 
     conn.commit()
     conn.close()
@@ -452,6 +459,38 @@ def get_revision_history(doc_id):
     conn = sqlite3.connect('docsmate.db', timeout=15)
     c = conn.cursor()
     c.execute('SELECT * FROM revision_history WHERE doc_id =?', (doc_id,))
+    data = c.fetchall()
+    conn.close()
+    return data
+
+def add_asil_entry(project_id, hazard_desc, severity, exposure, controllability, asil_rating):
+    conn = sqlite3.connect('docsmate.db', timeout=15)
+    c = conn.cursor()
+    c.execute('INSERT INTO asil_master (project_id, hazard_description, severity, exposure, controllability, asil_rating) VALUES (?,?,?,?,?,?)',
+              (project_id, hazard_desc, severity, exposure, controllability, asil_rating))
+    conn.commit()
+    conn.close()
+
+def get_asil_entries(project_id):
+    conn = sqlite3.connect('docsmate.db', timeout=15)
+    c = conn.cursor()
+    c.execute('SELECT * FROM asil_master WHERE project_id =?', (project_id,))
+    data = c.fetchall()
+    conn.close()
+    return data
+
+def add_sil_entry(project_id, hazard_desc, consequence, exposure, avoidance, probability, sil_rating):
+    conn = sqlite3.connect('docsmate.db', timeout=15)
+    c = conn.cursor()
+    c.execute('INSERT INTO sil_master (project_id, hazard_description, consequence, exposure, avoidance, probability, sil_rating) VALUES (?,?,?,?,?,?,?)',
+              (project_id, hazard_desc, consequence, exposure, avoidance, probability, sil_rating))
+    conn.commit()
+    conn.close()
+
+def get_sil_entries(project_id):
+    conn = sqlite3.connect('docsmate.db', timeout=15)
+    c = conn.cursor()
+    c.execute('SELECT * FROM sil_master WHERE project_id =?', (project_id,))
     data = c.fetchall()
     conn.close()
     return data
@@ -771,9 +810,7 @@ def documents_tab(project_id):
                 if history:
                     df = pd.DataFrame(history, columns=['ID', 'Doc ID', 'Status', 'Author ID', 'Timestamp', 'Comments'])
                     df['Author'] = df['Author ID'].apply(get_user_by_id)
-                    df['Doc Name'] = doc_name
-                    df['Doc Type'] = doc_type
-                    st.dataframe(df[['Doc Name', 'Doc Type', 'Status', 'Author', 'Timestamp', 'Comments']])
+                    st.dataframe(df[['Status', 'Author', 'Timestamp', 'Comments']])
                 else:
                     st.info("No revision history for this document yet.")
 
@@ -951,25 +988,76 @@ def traceability_tab(project_id):
 
 def hazard_traceability_tab(project_id):
     st.subheader("Hazards")
-    hazard_links = get_hazard_traceability(project_id)
-    if hazard_links:
-        df = pd.DataFrame(hazard_links, columns=['ID', 'Project ID', 'Hazard', 'Cause', 'Effect', 'Risk Control Measure', 'Verification'])
-        st.data_editor(df[['Hazard', 'Cause', 'Effect', 'Risk Control Measure', 'Verification']])
-    else:
-        st.info("No hazard traceability links recorded for this project yet.")
+    hazard_assessment_type = st.selectbox("Select Hazard Assessment Type", ["Medical (IEC 62304)", "Automotive (ISO 26262)", "General (IEC 61508)"])
 
-    with st.expander("Add New Hazard Traceability"):
-        with st.form("new_hazard_traceability_form", clear_on_submit=True):
-            hazard = st.text_input("Hazard")
-            cause = st.text_input("Cause")
-            effect = st.text_input("Effect")
-            risk_control = st.text_input("Risk Control Measure")
-            verification = st.text_input("Verification")
-            submitted = st.form_submit_button("Add Hazard")
-            if submitted:
-                add_hazard_traceability(project_id, hazard, cause, effect, risk_control, verification)
-                st.success("Hazard traceability link added!")
-                st.rerun()
+    if hazard_assessment_type == "Medical (IEC 62304)":
+        hazard_links = get_hazard_traceability(project_id)
+        if hazard_links:
+            df = pd.DataFrame(hazard_links, columns=['ID', 'Project ID', 'Hazard', 'Cause', 'Effect', 'Risk Control Measure', 'Verification'])
+            st.data_editor(df[['Hazard', 'Cause', 'Effect', 'Risk Control Measure', 'Verification']])
+        else:
+            st.info("No hazard traceability links recorded for this project yet.")
+
+        with st.expander("Add New Hazard Traceability"):
+            with st.form("new_hazard_traceability_form", clear_on_submit=True):
+                hazard = st.text_input("Hazard")
+                cause = st.text_input("Cause")
+                effect = st.text_input("Effect")
+                risk_control = st.text_input("Risk Control Measure")
+                verification = st.text_input("Verification")
+                submitted = st.form_submit_button("Add Hazard")
+                if submitted:
+                    add_hazard_traceability(project_id, hazard, cause, effect, risk_control, verification)
+                    st.success("Hazard traceability link added!")
+                    st.rerun()
+    
+    elif hazard_assessment_type == "Automotive (ISO 26262)":
+        st.subheader("ASIL Determination")
+        asil_entries = get_asil_entries(project_id)
+        if asil_entries:
+            df = pd.DataFrame(asil_entries, columns=['ID', 'Project ID', 'Hazard Description', 'Severity', 'Exposure', 'Controllability', 'ASIL Rating'])
+            st.dataframe(df[['Hazard Description', 'Severity', 'Exposure', 'Controllability', 'ASIL Rating']])
+        else:
+            st.info("No ASIL entries recorded for this project yet.")
+
+        with st.expander("Add New ASIL Entry"):
+            with st.form("new_asil_form", clear_on_submit=True):
+                hazard_desc = st.text_input("Hazard Description")
+                sev = st.selectbox("Severity", options=list(config.ASIL_SEVERITY.keys()))
+                exp = st.selectbox("Exposure", options=list(config.ASIL_EXPOSURE.keys()))
+                con = st.selectbox("Controllability", options=list(config.ASIL_CONTROLLABILITY.keys()))
+                submitted = st.form_submit_button("Calculate and Add ASIL")
+                if submitted:
+                    asil_rating = config.ASIL_RATING_TABLE.get(config.ASIL_SEVERITY[sev] + config.ASIL_EXPOSURE[exp] + config.ASIL_CONTROLLABILITY[con], "QM")
+                    add_asil_entry(project_id, hazard_desc, sev, exp, con, asil_rating)
+                    st.success("ASIL entry added!")
+                    st.rerun()
+
+    elif hazard_assessment_type == "General (IEC 61508)":
+        st.subheader("SIL Determination")
+        sil_entries = get_sil_entries(project_id)
+        if sil_entries:
+            df = pd.DataFrame(sil_entries, columns=['ID', 'Project ID', 'Hazard Description', 'Consequence', 'Exposure', 'Avoidance', 'Probability', 'SIL Rating'])
+            st.dataframe(df[['Hazard Description', 'Consequence', 'Exposure', 'Avoidance', 'Probability', 'SIL Rating']])
+        else:
+            st.info("No SIL entries recorded for this project yet.")
+
+        with st.expander("Add New SIL Entry"):
+            with st.form("new_sil_form", clear_on_submit=True):
+                hazard_desc = st.text_input("Hazard Description")
+                cons = st.selectbox("Consequence", options=list(config.SIL_CONSEQUENCE.keys()))
+                exp = st.selectbox("Exposure", options=list(config.SIL_EXPOSURE.keys()))
+                avo = st.selectbox("Avoidance", options=list(config.SIL_AVOIDANCE.keys()))
+                prob = st.selectbox("Probability", options=list(config.SIL_PROBABILITY.keys()))
+                submitted = st.form_submit_button("Calculate and Add SIL")
+                if submitted:
+                    sil_rating = config.SIL_RATING_TABLE.get(
+                        (config.SIL_PROBABILITY[prob], config.SIL_CONSEQUENCE[cons], config.SIL_EXPOSURE[exp], config.SIL_AVOIDANCE[avo]),
+                        "Invalid"
+                    )
+                    add_sil_entry(project_id, hazard_desc, cons, exp, avo, prob, sil_rating)
+                    st.success("SIL entry added!")
+                    st.rerun()
 
 def artifacts_tab(project_id):
     st.subheader("Artifacts")
@@ -1080,7 +1168,7 @@ def help_page():
 
     ### Configuration
 
-    * **Knowledge Base**: Upload your own documents to create a local knowledge base for the AI to use.
+    * **Knowledge Base**: Upload your own documents to create a local knowledge base for the RAG system.
 
     ### Admin
 
