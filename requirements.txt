@@ -2,4 +2,7 @@ streamlit
 pandas
 streamlit-quill
 xhtml2pdf
-
+fastapi
+uvicorn
+requests
+matplotlib

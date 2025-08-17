@@ -1,11 +1,19 @@
-version: '3.8'
-
 services:
-  docsmate:
+  backend:
     build: .
+    command: ["python", "-m", "uvicorn", "backend:app", "--host", "0.0.0.0", "--port", "8000"]
     ports:
-      - "8501:8501"
       - "8000:8000"
     volumes:
       - .:/app
+
+  frontend:
+    build: .
+    command: ["python", "-m", "streamlit", "run", "app.py", "--server.port", "8501", "--server.address", "0.0.0.0"]
+    ports:
+      - "8501:8501"
+    volumes:
+      - .:/app
+    depends_on:
+      - backend
 

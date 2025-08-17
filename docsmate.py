@@ -14,12 +14,14 @@ import ai_integration # Import the AI integration module
 import re
 from xhtml2pdf import pisa
 from io import BytesIO
+import zipfile
+import matplotlib.pyplot as plt
 
 # --- DATABASE SETUP ---
 
 def init_db():
     """Initializes the SQLite database and creates tables if they don't exist."""
-    conn = sqlite3.connect('docsmate.db')
+    conn = sqlite3.connect('docsmate.db', timeout=15)
     c = conn.cursor()
 
     # User table
@@ -140,6 +142,34 @@ def init_db():
         )
     ''')
 
+    # Hazard Traceability Matrix table
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS hazard_traceability (
+            id INTEGER PRIMARY KEY,
+            project_id INTEGER,
+            hazard TEXT,
+            cause TEXT,
+            effect TEXT,
+            risk_control_measure TEXT,
+            verification TEXT,
+            FOREIGN KEY(project_id) REFERENCES projects(id)
+        )
+    ''')
+    
+    # Revision History table
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS revision_history (
+            id INTEGER PRIMARY KEY,
+            doc_id INTEGER,
+            status TEXT,
+            author_id INTEGER,
+            timestamp DATETIME,
+            comments TEXT,
+            FOREIGN KEY(doc_id) REFERENCES documents(id),
+            FOREIGN KEY(author_id) REFERENCES users(id)
+        )
+    ''')
+
     conn.commit()
     conn.close()
     
@@ -187,14 +217,14 @@ def generate_pdf(html_content):
 # --- DATABASE FUNCTIONS ---
 
 def add_user(username, password, is_admin=False):
-    conn = sqlite3.connect('docsmate.db')
+    conn = sqlite3.connect('docsmate.db', timeout=15)
     c = conn.cursor()
     c.execute('INSERT INTO users (username, password_hash, is_admin) VALUES (?,?,?)', (username, make_hashes(password), is_admin))
     conn.commit()
     conn.close()
 
 def login_user(username, password):
-    conn = sqlite3.connect('docsmate.db')
+    conn = sqlite3.connect('docsmate.db', timeout=15)
     c = conn.cursor()
     c.execute('SELECT * FROM users WHERE username =?', (username,))
     data = c.fetchone()
@@ -206,7 +236,7 @@ def login_user(username, password):
 def get_user_by_id(user_id):
     if user_id == 0:
         return "AI Assistant"
-    conn = sqlite3.connect('docsmate.db')
+    conn = sqlite3.connect('docsmate.db', timeout=15)
     c = conn.cursor()
     c.execute('SELECT username FROM users WHERE id =?', (user_id,))
     data = c.fetchone()
@@ -214,7 +244,7 @@ def get_user_by_id(user_id):
     return data[0] if data else "Unknown"
 
 def get_all_users():
-    conn = sqlite3.connect('docsmate.db')
+    conn = sqlite3.connect('docsmate.db', timeout=15)
     c = conn.cursor()
     c.execute('SELECT id, username, is_admin FROM users')
     data = c.fetchall()
@@ -222,14 +252,14 @@ def get_all_users():
     return data
 
 def create_project(name, description, user_id):
-    conn = sqlite3.connect('docsmate.db')
+    conn = sqlite3.connect('docsmate.db', timeout=15)
     c = conn.cursor()
     c.execute('INSERT INTO projects (name, description, created_by_user_id) VALUES (?,?,?)', (name, description, user_id))
     conn.commit()
     conn.close()
 
 def get_projects():
-    conn = sqlite3.connect('docsmate.db')
+    conn = sqlite3.connect('docsmate.db', timeout=15)
     c = conn.cursor()
     c.execute('SELECT * FROM projects')
     data = c.fetchall()
@@ -237,7 +267,7 @@ def get_projects():
     return data
 
 def get_project_details(project_id):
-    conn = sqlite3.connect('docsmate.db')
+    conn = sqlite3.connect('docsmate.db', timeout=15)
     c = conn.cursor()
     c.execute('SELECT * FROM projects WHERE id =?', (project_id,))
     data = c.fetchone()
@@ -245,21 +275,21 @@ def get_project_details(project_id):
     return data
 
 def update_project(project_id, name, description):
-    conn = sqlite3.connect('docsmate.db')
+    conn = sqlite3.connect('docsmate.db', timeout=15)
     c = conn.cursor()
     c.execute('UPDATE projects SET name = ?, description = ? WHERE id = ?', (name, description, project_id))
     conn.commit()
     conn.close()
 
 def add_team_member(name, email, project_id):
-    conn = sqlite3.connect('docsmate.db')
+    conn = sqlite3.connect('docsmate.db', timeout=15)
     c = conn.cursor()
     c.execute('INSERT INTO team_members (name, email, project_id) VALUES (?,?,?)', (name, email, project_id))
     conn.commit()
     conn.close()
 
 def get_team_members(project_id):
-    conn = sqlite3.connect('docsmate.db')
+    conn = sqlite3.connect('docsmate.db', timeout=15)
     c = conn.cursor()
     c.execute('SELECT * FROM team_members WHERE project_id =?', (project_id,))
     data = c.fetchall()
@@ -267,7 +297,7 @@ def get_team_members(project_id):
     return data
 
 def create_document(project_id, doc_name, doc_type, content, version=1, status='Draft'):
-    conn = sqlite3.connect('docsmate.db')
+    conn = sqlite3.connect('docsmate.db', timeout=15)
     c = conn.cursor()
     now = datetime.now()
     c.execute('INSERT INTO documents (project_id, doc_name, doc_type, content, version, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)',
@@ -276,7 +306,7 @@ def create_document(project_id, doc_name, doc_type, content, version=1, status='
     conn.close()
 
 def get_documents(project_id):
-    conn = sqlite3.connect('docsmate.db')
+    conn = sqlite3.connect('docsmate.db', timeout=15)
     c = conn.cursor()
     c.execute('SELECT * FROM documents WHERE project_id =?', (project_id,))
     data = c.fetchall()
@@ -284,23 +314,24 @@ def get_documents(project_id):
     return data
     
 def get_document_details(doc_id):
-    conn = sqlite3.connect('docsmate.db')
+    conn = sqlite3.connect('docsmate.db', timeout=15)
     c = conn.cursor()
     c.execute('SELECT * FROM documents WHERE id =?', (doc_id,))
     data = c.fetchone()
     conn.close()
     return data
 
-def update_document(doc_id, content):
-    conn = sqlite3.connect('docsmate.db')
+def update_document(doc_id, content, status, comments, author_id):
+    conn = sqlite3.connect('docsmate.db', timeout=15)
     c = conn.cursor()
     now = datetime.now()
-    c.execute('UPDATE documents SET content =?, updated_at =? WHERE id =?', (json.dumps({"content": content}), now, doc_id))
+    c.execute('UPDATE documents SET content =?, status = ?, updated_at =? WHERE id =?', (json.dumps({"content": content}), status, now, doc_id))
+    add_revision_history(doc_id, status, author_id, comments, c)
     conn.commit()
     conn.close()
 
 def add_risk(project_id, failure_mode, severity, occurrence, detection, rpn, comments, status='New'):
-    conn = sqlite3.connect('docsmate.db')
+    conn = sqlite3.connect('docsmate.db', timeout=15)
     c = conn.cursor()
     c.execute('INSERT INTO risks (project_id, failure_mode, severity, occurrence, detection, rpn, comments, status) VALUES (?,?,?,?,?,?,?,?)',
               (project_id, failure_mode, severity, occurrence, detection, rpn, comments, status))
@@ -308,7 +339,7 @@ def add_risk(project_id, failure_mode, severity, occurrence, detection, rpn, com
     conn.close()
 
 def get_risks(project_id):
-    conn = sqlite3.connect('docsmate.db')
+    conn = sqlite3.connect('docsmate.db', timeout=15)
     c = conn.cursor()
     c.execute('SELECT * FROM risks WHERE project_id =?', (project_id,))
     data = c.fetchall()
@@ -316,7 +347,7 @@ def get_risks(project_id):
     return data
 
 def add_traceability(project_id, requirement_ref, design_ref, test_ref):
-    conn = sqlite3.connect('docsmate.db')
+    conn = sqlite3.connect('docsmate.db', timeout=15)
     c = conn.cursor()
     c.execute('INSERT INTO traceability (project_id, requirement_ref, design_ref, test_ref) VALUES (?,?,?,?)',
               (project_id, requirement_ref, design_ref, test_ref))
@@ -324,7 +355,7 @@ def add_traceability(project_id, requirement_ref, design_ref, test_ref):
     conn.close()
 
 def get_traceability(project_id):
-    conn = sqlite3.connect('docsmate.db')
+    conn = sqlite3.connect('docsmate.db', timeout=15)
     c = conn.cursor()
     c.execute('SELECT * FROM traceability WHERE project_id =?', (project_id,))
     data = c.fetchall()
@@ -332,17 +363,18 @@ def get_traceability(project_id):
     return data
 
 def add_review(document_id, reviewer_id, comments, status):
-    conn = sqlite3.connect('docsmate.db')
+    conn = sqlite3.connect('docsmate.db', timeout=15)
     c = conn.cursor()
     c.execute('INSERT INTO reviews (document_id, reviewer_id, comments, status) VALUES (?,?,?,?)',
               (document_id, reviewer_id, comments, status))
     if status in ["Approved", "Needs Revision"]:
         c.execute('UPDATE documents SET status = ? WHERE id = ?', (status, document_id))
+        add_revision_history(document_id, status, reviewer_id, comments, c)
     conn.commit()
     conn.close()
 
 def get_reviews_for_document(document_id):
-    conn = sqlite3.connect('docsmate.db')
+    conn = sqlite3.connect('docsmate.db', timeout=15)
     c = conn.cursor()
     c.execute('''
         SELECT r.comments, r.status, CASE WHEN r.reviewer_id = 0 THEN 'AI Assistant' ELSE u.username END
@@ -356,7 +388,7 @@ def get_reviews_for_document(document_id):
 
 # --- Template DB Functions ---
 def create_template(name, content, doc_type):
-    conn = sqlite3.connect('docsmate.db')
+    conn = sqlite3.connect('docsmate.db', timeout=15)
     c = conn.cursor()
     now = datetime.now()
     c.execute('INSERT INTO templates (name, content, document_type, created_at) VALUES (?,?,?,?)', (name, content, doc_type, now))
@@ -364,7 +396,7 @@ def create_template(name, content, doc_type):
     conn.close()
 
 def get_templates():
-    conn = sqlite3.connect('docsmate.db')
+    conn = sqlite3.connect('docsmate.db', timeout=15)
     c = conn.cursor()
     c.execute('SELECT * FROM templates')
     data = c.fetchall()
@@ -372,7 +404,7 @@ def get_templates():
     return data
 
 def get_template_details(template_id):
-    conn = sqlite3.connect('docsmate.db')
+    conn = sqlite3.connect('docsmate.db', timeout=15)
     c = conn.cursor()
     c.execute('SELECT * FROM templates WHERE id = ?', (template_id,))
     data = c.fetchone()
@@ -380,11 +412,49 @@ def get_template_details(template_id):
     return data
 
 def update_template(template_id, name, content):
-    conn = sqlite3.connect('docsmate.db')
+    conn = sqlite3.connect('docsmate.db', timeout=15)
     c = conn.cursor()
     c.execute('UPDATE templates SET name = ?, content = ? WHERE id = ?', (name, content, template_id))
     conn.commit()
     conn.close()
+
+def add_hazard_traceability(project_id, hazard, cause, effect, risk_control_measure, verification):
+    conn = sqlite3.connect('docsmate.db', timeout=15)
+    c = conn.cursor()
+    c.execute('INSERT INTO hazard_traceability (project_id, hazard, cause, effect, risk_control_measure, verification) VALUES (?,?,?,?,?,?)',
+              (project_id, hazard, cause, effect, risk_control_measure, verification))
+    conn.commit()
+    conn.close()
+
+def get_hazard_traceability(project_id):
+    conn = sqlite3.connect('docsmate.db', timeout=15)
+    c = conn.cursor()
+    c.execute('SELECT * FROM hazard_traceability WHERE project_id =?', (project_id,))
+    data = c.fetchall()
+    conn.close()
+    return data
+
+def add_revision_history(doc_id, status, author_id, comments, db_cursor=None):
+    conn = None
+    if not db_cursor:
+        conn = sqlite3.connect('docsmate.db', timeout=15)
+        db_cursor = conn.cursor()
+    
+    now = datetime.now()
+    db_cursor.execute('INSERT INTO revision_history (doc_id, status, author_id, timestamp, comments) VALUES (?,?,?,?,?)',
+              (doc_id, status, author_id, now, comments))
+    
+    if conn:
+        conn.commit()
+        conn.close()
+
+def get_revision_history(doc_id):
+    conn = sqlite3.connect('docsmate.db', timeout=15)
+    c = conn.cursor()
+    c.execute('SELECT * FROM revision_history WHERE doc_id =?', (doc_id,))
+    data = c.fetchall()
+    conn.close()
+    return data
 
 # --- STREAMLIT APP ---
 
@@ -424,7 +494,7 @@ def main():
         st.sidebar.subheader(f"Welcome {st.session_state['user_info'][1]}")
         st.session_state.show_logs = st.sidebar.toggle("Show App Logs", value=False)
         
-        nav_options = ["Projects", "Templates", "Configuration", "Admin"]
+        nav_options = ["Projects", "Templates", "Configuration", "Admin", "Help"]
         if st.session_state.show_logs:
             nav_options.append("App Logs")
 
@@ -445,6 +515,8 @@ def main():
             app_logs_page()
         elif page == "Admin" and st.session_state['user_info'][3]:
             admin_page()
+        elif page == "Help":
+            help_page()
         elif page == "Admin" and not st.session_state['user_info'][3]:
             st.warning("You do not have admin privileges.")
 
@@ -481,46 +553,30 @@ def projects_page():
                         st.success("Project updated successfully!")
                         st.rerun()
             
-            if st.sidebar.button("Show Project Metrics"):
-                st.session_state.show_metrics = not st.session_state.get('show_metrics', False)
-
-            if st.session_state.get('show_metrics', False):
-                show_project_metrics(selected_project[0])
-
             project_detail_page(selected_project[0])
-
-def show_project_metrics(project_id):
-    with st.sidebar.expander("Project Metrics", expanded=True):
-        docs = get_documents(project_id)
-        risks = get_risks(project_id)
-        
-        st.metric("Total Documents", len(docs))
-        st.metric("Total Risks", len(risks))
-
-        if docs:
-            doc_df = pd.DataFrame(docs, columns=['id', 'project_id', 'doc_name', 'doc_type', 'content', 'version', 'status', 'created_at', 'updated_at'])
-            st.write("**Document Status Distribution**")
-            st.bar_chart(doc_df['status'].value_counts())
-        
-        if risks:
-            risk_df = pd.DataFrame(risks, columns=['id', 'project_id', 'failure_mode', 'severity', 'occurrence', 'detection', 'rpn', 'comments', 'status'])
-            st.write("**Risk Priority Number (RPN) Distribution**")
-            st.bar_chart(risk_df['rpn'])
-
 
 def project_detail_page(project_id):
     project_details = get_project_details(project_id)
     st.header(f"Project: {project_details[1]}")
     st.write(project_details[2])
-    tabs = st.tabs(["Documents", "Team", "Risks", "Traceability"])
+    tabs = st.tabs(["Team", "Documents", "Risks", "Hazards", "Traceability", "Artifacts", "Metrics", "AI Audit"])
     with tabs[0]:
-        documents_tab(project_id)
-    with tabs[1]:
         team_tab(project_id)
+    with tabs[1]:
+        documents_tab(project_id)
     with tabs[2]:
         risks_tab(project_id)
     with tabs[3]:
+        hazard_traceability_tab(project_id)
+    with tabs[4]:
         traceability_tab(project_id)
+    with tabs[5]:
+        artifacts_tab(project_id)
+    with tabs[6]:
+        metrics_tab(project_id)
+    with tabs[7]:
+        ai_audit_tab(project_id)
+
 
 def documents_tab(project_id):
     st.subheader("Documents")
@@ -608,8 +664,6 @@ def documents_tab(project_id):
                 doc_id, _, doc_name, doc_type, content_json, version, status, _, updated_at = doc_details
                 content_data = json.loads(content_json)
                 
-                st.write(f"**File:** {doc_name}(v{version}) | **Document Type:** {doc_type} | **Status:** {status} | **Author:** {project_author} | **Timestamp:** {updated_at}")
-                
                 col1, col2, col3 = st.columns([2.5, 0.5, 0.5])
                 with col1:
                     st.write("#### Document Editor")
@@ -654,10 +708,14 @@ def documents_tab(project_id):
                             st.markdown(st.session_state[f'ai_response_{doc_id}'], unsafe_allow_html=True)
 
                 content_from_editor = st_quill(value=content_data.get("content", ""), html=True, key=f"quill_editor_{doc_id}")
+                
+                st.write(f"**File:** {doc_name}(v{version}) | **Status:** {status}")
+                author_comment = st.text_input("Author comment to Reviewer")
+                reviewers = st.multiselect("Select Reviewers", [member[1] for member in get_team_members(project_id)])
 
-                if st.button("Save Document", key=f"save_doc_{doc_id}"):
-                    update_document(doc_id, content_from_editor)
-                    st.success("Document saved successfully!")
+                if st.button("Save and Request Review", key=f"save_doc_{doc_id}"):
+                    update_document(doc_id, content_from_editor, "Review Request", author_comment, st.session_state['user_info'][0])
+                    st.success("Document saved and review requested!")
                     st.rerun()
 
                 st.markdown("---")
@@ -686,14 +744,16 @@ def documents_tab(project_id):
                                 st.success("AI review added.")
                                 del st.session_state.ai_review_doc_id
                                 st.rerun()
-
-                reviews = get_reviews_for_document(doc_id)
-                if reviews:
-                    for review in reviews:
-                        with st.expander(f"Review by **{review[2]}** - Status: **{review[1]}**"):
+                
+                with st.expander("Reviews"):
+                    reviews = get_reviews_for_document(doc_id)
+                    if reviews:
+                        for review in reviews:
+                            st.markdown(f"**Review by {review[2]} - Status: {review[1]}**")
                             st.markdown(review[0], unsafe_allow_html=True)
-                else:
-                    st.info("No reviews for this document yet.")
+                            st.markdown("---")
+                    else:
+                        st.info("No reviews for this document yet.")
                 
                 with st.form(key=f"review_form_{doc_id}", clear_on_submit=True):
                     st.write("Add your review")
@@ -704,6 +764,19 @@ def documents_tab(project_id):
                         add_review(doc_id, st.session_state['user_info'][0], comment, status)
                         st.success("Your review has been submitted.")
                         st.rerun()
+
+                st.markdown("---")
+                st.subheader("Revision History")
+                history = get_revision_history(doc_id)
+                if history:
+                    df = pd.DataFrame(history, columns=['ID', 'Doc ID', 'Status', 'Author ID', 'Timestamp', 'Comments'])
+                    df['Author'] = df['Author ID'].apply(get_user_by_id)
+                    df['Doc Name'] = doc_name
+                    df['Doc Type'] = doc_type
+                    st.dataframe(df[['Doc Name', 'Doc Type', 'Status', 'Author', 'Timestamp', 'Comments']])
+                else:
+                    st.info("No revision history for this document yet.")
+
 
 def templates_page():
     st.header("Document Templates")
@@ -808,7 +881,7 @@ def risks_tab(project_id):
     with col1:
         st.subheader("Risk Management")
     with col2:
-        if st.button("✨ AI Risk Assist", key=f"ai_risk_{project_id}"):
+        if st.button("✨ AI Assist", key=f"ai_risk_{project_id}"):
             st.session_state.ai_risk_open = not st.session_state.get('ai_risk_open', False)
     
     if st.session_state.get('ai_risk_open', False):
@@ -819,6 +892,8 @@ def risks_tab(project_id):
                 with st.spinner("Generating AI content..."):
                     generated_risks = ai_integration.generate_risk_analysis(prompt)
                     for risk_desc in generated_risks:
+                        # Remove serial numbers from AI-generated risks
+                        risk_desc = re.sub(r'^\d+\.\s*', '', risk_desc)
                         add_risk(project_id, risk_desc, 1, 1, 1, 1, "AI Generated")
                     show_logs(prompt, "\n".join(generated_risks))
                     st.success(f"{len(generated_risks)} risks have been automatically added.")
@@ -828,7 +903,15 @@ def risks_tab(project_id):
     risks = get_risks(project_id)
     if risks:
         df = pd.DataFrame(risks, columns=['ID', 'Project ID', 'Failure Mode', 'Severity', 'Occurrence', 'Detection', 'RPN', 'Comments', 'Status'])
-        st.dataframe(df[['Failure Mode', 'Severity', 'Occurrence', 'Detection', 'RPN', 'Comments', 'Status']])
+        df.index = [f"RISK_{i+1}" for i in range(len(df))]
+        
+        # Configure columns for data_editor
+        column_config = {
+            "RPN": st.column_config.NumberColumn("RPN", disabled=True),
+            "Status": st.column_config.SelectboxColumn("Status", options=config.RISK_STATUS_OPTIONS)
+        }
+        
+        st.data_editor(df[['Failure Mode', 'Severity', 'Occurrence', 'Detection', 'RPN', 'Comments', 'Status']], column_config=column_config)
     else:
         st.info("No risks recorded for this project yet.")
 
@@ -866,6 +949,79 @@ def traceability_tab(project_id):
                 st.success("Traceability link added!")
                 st.rerun()
 
+def hazard_traceability_tab(project_id):
+    st.subheader("Hazards")
+    hazard_links = get_hazard_traceability(project_id)
+    if hazard_links:
+        df = pd.DataFrame(hazard_links, columns=['ID', 'Project ID', 'Hazard', 'Cause', 'Effect', 'Risk Control Measure', 'Verification'])
+        st.data_editor(df[['Hazard', 'Cause', 'Effect', 'Risk Control Measure', 'Verification']])
+    else:
+        st.info("No hazard traceability links recorded for this project yet.")
+
+    with st.expander("Add New Hazard Traceability"):
+        with st.form("new_hazard_traceability_form", clear_on_submit=True):
+            hazard = st.text_input("Hazard")
+            cause = st.text_input("Cause")
+            effect = st.text_input("Effect")
+            risk_control = st.text_input("Risk Control Measure")
+            verification = st.text_input("Verification")
+            submitted = st.form_submit_button("Add Hazard")
+            if submitted:
+                add_hazard_traceability(project_id, hazard, cause, effect, risk_control, verification)
+                st.success("Hazard traceability link added!")
+                st.rerun()
+
+def artifacts_tab(project_id):
+    st.subheader("Artifacts")
+    
+    docs = get_documents(project_id)
+    approved_docs = [d for d in docs if d[6] == "Approved"]
+
+    if not approved_docs:
+        st.info("No approved documents yet.")
+    else:
+        df = pd.DataFrame(approved_docs, columns=['id', 'project_id', 'doc_name', 'doc_type', 'content', 'version', 'status', 'created_at', 'updated_at'])
+        df['author'] = get_user_by_id(get_project_details(project_id)[3])
+        st.dataframe(df[['doc_name', 'doc_type', 'version', 'author', 'updated_at']])
+
+        if st.button("Download All"):
+            zip_buffer = BytesIO()
+            with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
+                for index, row in df.iterrows():
+                    pdf_data = generate_pdf(json.loads(row['content']).get("content", ""))
+                    zip_file.writestr(f"{row['doc_name']}_v{row['version']}.pdf", pdf_data)
+            
+            st.download_button(
+                label="Download All as ZIP",
+                data=zip_buffer.getvalue(),
+                file_name=f"{get_project_details(project_id)[1]}_Documents_{datetime.now().strftime('%Y%m%d')}.zip",
+                mime="application/zip"
+            )
+
+def metrics_tab(project_id):
+    st.subheader("Project Metrics")
+    docs = get_documents(project_id)
+    risks = get_risks(project_id)
+    
+    st.metric("Total Documents", len(docs))
+    st.metric("Total Risks", len(risks))
+
+    if docs:
+        doc_df = pd.DataFrame(docs, columns=['id', 'project_id', 'doc_name', 'doc_type', 'content', 'version', 'status', 'created_at', 'updated_at'])
+        st.write("**Document Status Distribution**")
+        st.bar_chart(doc_df['status'].value_counts())
+    
+    if risks:
+        risk_df = pd.DataFrame(risks, columns=['id', 'project_id', 'failure_mode', 'severity', 'occurrence', 'detection', 'rpn', 'comments', 'status'])
+        st.write("**Risk Priority Number (RPN) Distribution**")
+        st.bar_chart(risk_df['rpn'])
+
+def ai_audit_tab(project_id):
+    st.subheader("AI Audit")
+    st.button("AI Audit", disabled=True)
+    st.info("AI Audit functionality coming soon.")
+
+
 def admin_page():
     st.header("Admin Dashboard")
     st.subheader("Manage Users")
@@ -875,7 +1031,7 @@ def admin_page():
 
 def app_logs_page():
     st.header("Application Logs")
-    if st.session_state.app_logs:
+    if 'app_logs' in st.session_state and st.session_state.app_logs:
         for log in reversed(st.session_state.app_logs):
             with st.container(border=True):
                 st.write(f"**Timestamp:** {log['timestamp']}")
@@ -885,6 +1041,51 @@ def app_logs_page():
                 st.code(log['response'], language='html')
     else:
         st.info("No log entries yet.")
+
+def help_page():
+    st.header("Docsmate Help")
+    st.markdown("""
+    Welcome to Docsmate, your all-in-one solution for document lifecycle management in regulated engineering industries. This guide will walk you through the key features of the application.
+
+    ## Getting Started
+
+    To begin, create a new project from the sidebar. Once a project is created, you can select it from the dropdown to access its details and start managing your documents and other resources.
+
+    ## Key Features
+
+    ### Projects
+
+    * **Create New Project**: Use the form in the sidebar to create a new project.
+    * **Edit Project**: Select a project and use the "Edit Current Project" section to update its name and description.
+
+    ### Documents
+
+    * **Create New Document**: You can create a new document from scratch, from a template, from an existing document, or with the help of AI.
+    * **Document Editor**: Use the rich-text editor to create and format your documents.
+    * **AI Assist**: Get help from the AI to improve your writing, summarize content, or generate new ideas.
+    * **Reviews & Comments**: Collaborate with your team by requesting reviews and adding comments.
+    * **Revision History**: Track all changes made to a document over time.
+    * **Export to PDF**: Download a PDF version of your document for easy sharing and archiving.
+
+    ### Risks
+
+    * **Risk Management**: Identify, assess, and mitigate project risks.
+    * **AI Risk Assist**: Use the AI to automatically identify potential risks based on your project's description.
+    * **FMEA Table**: Manage your risks in a familiar FMEA (Failure Mode and Effects Analysis) format.
+
+    ### Templates
+
+    * **Create and Manage Templates**: Create reusable document templates to standardize your documentation process.
+    * **AI Template Generation**: Use the AI to generate new templates based on your requirements.
+
+    ### Configuration
+
+    * **Knowledge Base**: Upload your own documents to create a local knowledge base for the AI to use.
+
+    ### Admin
+
+    * **User Management**: Admins can view and manage all users in the system.
+    """)
 
 if __name__ == '__main__':
     init_db()

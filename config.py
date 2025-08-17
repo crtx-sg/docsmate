@@ -17,6 +17,33 @@ DOCUMENT_TYPES = [
     "Design Transfer"
 ]
 
+# --- RISK STATUS OPTIONS ---
+RISK_STATUS_OPTIONS = ["New", "Ignore", "Minor", "Major", "Severe"]
+
+# --- ASIL RATING OPTIONS ---
+ASIL_EXPOSURE = {
+    "E0: Incredibly unlikely": 0,
+    "E1: Very low probability": 1,
+    "E2: Low probability": 2,
+    "E3: Medium probability": 3,
+    "E4: High probability": 4
+}
+
+ASIL_SEVERITY = {
+    "S0: No injuries": 0,
+    "S1: Light to moderate injuries": 1,
+    "S2: Severe to life-threatening injuries (survival probable)": 2,
+    "S3: Life-threatening injuries (survival uncertain) to fatal injuries": 3
+}
+
+ASIL_CONTROLLABILITY = {
+    "C0: Controllable in general": 0,
+    "C1: Simply controllable": 1,
+    "C2: Normally controllable": 2,
+    "C3: Difficult to control or uncontrollable": 3
+}
+
+
 # --- GENERAL LLM CONFIGURATION ---
 LLM_PROVIDER = 'ollama'
 HUGGINGFACE_API_KEY = "YOUR_HUGGINGFACE_API_KEY"

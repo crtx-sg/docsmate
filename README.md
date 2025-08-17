@@ -52,6 +52,7 @@ Docsmate is a comprehensive, AI-enhanced platform for managing the entire lifecy
 
 - `app.py`: The main Streamlit application file.
 - `backend.py`: The FastAPI backend application.
+- `docsmate.py`: The standalone monolithic application.
 - `config.py`: Configuration file for AI models, prompts, and other settings.
 - `ai_integration.py`: Module for handling interactions with AI models.
 - `requirements.txt`: Python dependencies for the project.
