@@ -14,7 +14,8 @@ DOCUMENT_TYPES = [
     "Design Changes",
     "Software Validation",
     "Design Reviews",
-    "Design Transfer"
+    "Design Transfer",
+    "Code Review"
 ]
 
 # --- RISK STATUS OPTIONS ---
@@ -39,7 +40,7 @@ ASIL_EXPOSURE = {
 ASIL_CONTROLLABILITY = {
     "C0: Controllable in general (100% of drivers or other traffic participants can usually avoid harm)": 0,
     "C1: Simply controllable (99% of drivers or other traffic participants can usually avoid harm)": 1,
-    "C2: Normally controllable (90% or more of all drivers or other traffic participants are usually able to avoid harm)": 2,
+    "C2: Normally controllable (90% or more of all drivers or other traffic participants can usually avoid harm)": 2,
     "C3: Difficult to control or uncontrollable (less than 90% of drivers or other traffic participants can usually avoid harm)": 3
 }
 
@@ -111,12 +112,34 @@ SIL_RATING_TABLE = {
 }
 
 # --- GENERAL LLM CONFIGURATION ---
+# Set your preferred LLM provider here: 'ollama', 'huggingface', 'openai', 'anthropic', 'gemini', 'grok'
 LLM_PROVIDER = 'ollama'
-HUGGINGFACE_API_KEY = "YOUR_HUGGINGFACE_API_KEY"
-HUGGINGFACE_LLM_MODEL = "mistralai/Mistral-7B-Instruct-v0.1"
-HUGGINGFACE_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+
+# Ollama Configuration
+OLLAMA_API_BASE_URL = 'http://localhost:11434' # Default Ollama API URL
 OLLAMA_LLM_MODEL = "qwen2:7b"  # Specify the Ollama model to use
 OLLAMA_EMBEDDING_MODEL = "nomic-embed-text:latest" # Specify the Ollama model for embeddings
+
+# Hugging Face Configuration
+HUGGINGFACE_API_KEY = "hf_YOUR_HUGGINGFACE_API_KEY" # Replace with your Hugging Face API key
+HUGGINGFACE_LLM_MODEL = "mistralai/Mistral-7B-Instruct-v0.1" # Example model
+HUGGINGFACE_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2" # Example embedding model
+
+# OpenAI Configuration
+OPENAI_API_KEY = "sk-YOUR_OPENAI_API_KEY" # Replace with your OpenAI API key
+OPENAI_LLM_MODEL = "gpt-3.5-turbo" # Example model
+
+# Anthropic Configuration
+ANTHROPIC_API_KEY = "sk-ant-YOUR_ANTHROPIC_API_KEY" # Replace with your Anthropic API key
+ANTHROPIC_LLM_MODEL = "claude-3-opus-20240229" # Example model
+
+# Gemini Configuration (Google Generative AI)
+GEMINI_API_KEY = "YOUR_GEMINI_API_KEY" # Replace with your Gemini API key
+GEMINI_LLM_MODEL = "gemini-pro" # Example model
+
+# Grok Configuration (Placeholder - API details would go here)
+GROK_API_KEY = "YOUR_GROK_API_KEY" # Replace with your Grok API key
+GROK_LLM_MODEL = "grok-1" # Example model
 
 # --- RAG CONFIGURATION ---
 RAG_LLM_PROVIDER = 'ollama'
@@ -144,7 +167,7 @@ NEW_DOCUMENT_PROMPTS = {
     "Design Changes": "Draft a Design Change protocol document for a [configurable_item]. It should outline the process for requesting, evaluating, and implementing design changes.",
     "Software Validation": "Generate a Software Validation plan for a [configurable_item] with software components. Include sections on unit, integration, and system testing.",
     "Design Reviews": "Create a template for conducting formal Design Reviews for a [configurable_item]. Include agenda items, a list of typical attendees, and expected outcomes.",
-    "Design Transfer": "Outline a Design Transfer plan for a [configurable_item] to move it from development to manufacturing. Detail the steps for process validation and quality control."
+    "Design Transfer": "Outline a Design Transfer plan for a [configurable_item] to move it from development to manufacturing to manufacturing. Detail the steps for process validation and quality control."
 }
 
 # --- AI PROMPTS FOR DOCUMENT REVIEW ---
@@ -172,4 +195,3 @@ GENERAL_AI_PROMPTS = {
     "Improve Writing": "Improve the clarity and conciseness of the following text.",
     "Check for Inconsistencies": "Review the following text for any inconsistencies or contradictions."
 }
-

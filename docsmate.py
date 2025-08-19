@@ -625,7 +625,7 @@ def documents_tab(project_id):
     project_author = get_user_by_id(project_author_id)
 
     with st.expander("Create New Document"):
-        source_options = ["From Scratch", "From a Template", "From an Existing Document", "Using AI"]
+        source_options = ["From Scratch", "From a Template", "From an Existing Document"]
         
         doc_type = None
         content_source = ""
@@ -654,20 +654,7 @@ def documents_tab(project_id):
                 version += 1
             else:
                 st.warning("No existing documents in this project.")
-        elif source_choice == "Using AI":
-            doc_type = st.selectbox("Select Document Type for AI Generation", config.DOCUMENT_TYPES, key="ai_type")
-            if st.button("Generate with AI"):
-                if doc_type:
-                    prompt = config.NEW_DOCUMENT_PROMPTS.get(doc_type, "").replace("[configurable_item]", project_description)
-                    if prompt:
-                        with st.spinner("Generating document..."):
-                            content_source = ai_integration.generate_text(prompt)
-                        st.session_state.ai_generated_content = content_source
-                        show_logs(prompt, content_source)
-                    else:
-                        st.error("No AI prompt defined for this document type.")
-                else:
-                    st.error("Please select a document type.")
+        
 
         if 'ai_generated_content' in st.session_state:
             st.success("AI content generated. Review and create the document.")
@@ -744,7 +731,7 @@ def documents_tab(project_id):
                         st.text_area("Your prompt to the AI:", value=default_prompt, height=100, key=f"editor_ai_prompt_{doc_id}")
                         
                         if f'ai_response_{doc_id}' in st.session_state:
-                            st.markdown(st.session_state[f'ai_response_{doc_id}'], unsafe_allow_html=True)
+                            st.text_area("Response from the AI:", value=st.session_state[f'ai_response_{doc_id}'], height=300, key=f"editor_ai_response_{doc_id}")
 
                 content_from_editor = st_quill(value=content_data.get("content", ""), html=True, key=f"quill_editor_{doc_id}")
                 
@@ -759,30 +746,9 @@ def documents_tab(project_id):
 
                 st.markdown("---")
                 
-                rev_col1, rev_col2 = st.columns([3, 1])
-                with rev_col1:
-                    st.subheader("Reviews & Comments")
-                with rev_col2:
-                    if st.button("✨ AI Assist", key=f"ai_review_{doc_id}"):
-                        st.session_state.ai_review_doc_id = doc_id if st.session_state.get('ai_review_doc_id') != doc_id else None
+                st.subheader("Reviews & Comments")
 
-                if st.session_state.get('ai_review_doc_id') == doc_id:
-                     with st.container(border=True):
-                        st.subheader("AI Review Assistant")
-                        prompt_template = config.REVIEW_PROMPTS.get(doc_type, "Review this document for clarity, consistency, and completeness.")
-                        default_prompt = prompt_template.replace("[configurable_item]", project_description)
-                        
-                        user_prompt = st.text_area("Your review prompt:", value=default_prompt, height=100, key=f"review_ai_prompt_{doc_id}")
-                        if st.button("Review with AI", key=f"review_ai_gen_{doc_id}"):
-                            clean_context = re.sub('<[^<]+?>', '', content_data.get("content", ""))
-                            full_prompt = f"Context:\n{clean_context}\n\nTask: {user_prompt}"
-                            with st.spinner("Generating AI review..."):
-                                ai_comment = ai_integration.generate_review(full_prompt)
-                                add_review(doc_id, 0, ai_comment, "AI Review")
-                                show_logs(full_prompt, ai_comment)
-                                st.success("AI review added.")
-                                del st.session_state.ai_review_doc_id
-                                st.rerun()
+                
                 
                 with st.expander("Reviews"):
                     reviews = get_reviews_for_document(doc_id)
@@ -917,25 +883,9 @@ def risks_tab(project_id):
     col1, col2 = st.columns([3, 1])
     with col1:
         st.subheader("Risk Management")
-    with col2:
-        if st.button("✨ AI Assist", key=f"ai_risk_{project_id}"):
-            st.session_state.ai_risk_open = not st.session_state.get('ai_risk_open', False)
     
-    if st.session_state.get('ai_risk_open', False):
-        with st.expander("AI Risk Assistant", expanded=True):
-            st.write("Use AI to identify potential risks based on the project description.")
-            if st.button("Generate and Add Risks", key="risk_ai_gen"):
-                prompt = config.NEW_DOCUMENT_PROMPTS.get("Risk Analysis", "").replace("[configurable_item]", project_description)
-                with st.spinner("Generating AI content..."):
-                    generated_risks = ai_integration.generate_risk_analysis(prompt)
-                    for risk_desc in generated_risks:
-                        # Remove serial numbers from AI-generated risks
-                        risk_desc = re.sub(r'^\d+\.\s*', '', risk_desc)
-                        add_risk(project_id, risk_desc, 1, 1, 1, 1, "AI Generated")
-                    show_logs(prompt, "\n".join(generated_risks))
-                    st.success(f"{len(generated_risks)} risks have been automatically added.")
-                    st.session_state.ai_risk_open = False
-                    st.rerun()
+    
+    
 
     risks = get_risks(project_id)
     if risks:
