@@ -16,6 +16,7 @@ from xhtml2pdf import pisa
 from io import BytesIO
 import zipfile
 import matplotlib.pyplot as plt
+import difflib
 
 # --- DATABASE SETUP ---
 
@@ -29,14 +30,21 @@ def init_db():
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY,
             username TEXT UNIQUE,
+            email TEXT UNIQUE,
             password_hash TEXT,
             is_admin BOOLEAN
         )
     ''')
+    # Add email column if it doesn't exist
+    c.execute("PRAGMA table_info(users)")
+    columns = [column[1] for column in c.fetchall()]
+    if 'email' not in columns:
+        c.execute("ALTER TABLE users ADD COLUMN email TEXT UNIQUE")
+
     # Add aiuser if not exists
     c.execute("SELECT * FROM users WHERE username='aiuser'")
     if not c.fetchone():
-        add_user('aiuser', 'ai_password', is_admin=False)
+        add_user('aiuser', 'ai_password', 'aiuser@docsmate.com', is_admin=False)
 
 
     # Projects table
@@ -71,10 +79,10 @@ def init_db():
     c.execute('''
         CREATE TABLE IF NOT EXISTS team_members (
             id INTEGER PRIMARY KEY,
-            name TEXT,
-            email TEXT,
+            user_id INTEGER,
             project_id INTEGER,
-            FOREIGN KEY(project_id) REFERENCES projects(id)
+            FOREIGN KEY(project_id) REFERENCES projects(id),
+            FOREIGN KEY(user_id) REFERENCES users(id)
         )
     ''')
     
@@ -101,18 +109,6 @@ def init_db():
         c.execute("ALTER TABLE documents ADD COLUMN doc_name TEXT DEFAULT 'Untitled'")
 
 
-    # Reviews table
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS reviews (
-            id INTEGER PRIMARY KEY,
-            document_id INTEGER,
-            reviewer_id INTEGER,
-            comments TEXT,
-            status TEXT,
-            FOREIGN KEY(document_id) REFERENCES documents(id),
-            FOREIGN KEY(reviewer_id) REFERENCES users(id)
-        )
-    ''')
 
     # Risks table
     c.execute('''
@@ -142,6 +138,19 @@ def init_db():
         )
     ''')
 
+    # Reviews table
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS reviews (
+            id INTEGER PRIMARY KEY,
+            document_id INTEGER,
+            reviewer_id INTEGER,
+            comments TEXT,
+            status TEXT,
+            FOREIGN KEY(document_id) REFERENCES documents(id),
+            FOREIGN KEY(reviewer_id) REFERENCES users(id)
+        )
+    ''')
+
     # Hazard Traceability Matrix table
     c.execute('''
         CREATE TABLE IF NOT EXISTS hazard_traceability (
@@ -152,9 +161,24 @@ def init_db():
             effect TEXT,
             risk_control_measure TEXT,
             verification TEXT,
+            severity INTEGER,
+            occurrence INTEGER,
+            detection INTEGER,
+            mitigation_notes TEXT,
             FOREIGN KEY(project_id) REFERENCES projects(id)
         )
     ''')
+    # Check and add new columns for backward compatibility
+    c.execute("PRAGMA table_info(hazard_traceability)")
+    columns = [column[1] for column in c.fetchall()]
+    if 'severity' not in columns:
+        c.execute("ALTER TABLE hazard_traceability ADD COLUMN severity INTEGER")
+    if 'occurrence' not in columns:
+        c.execute("ALTER TABLE hazard_traceability ADD COLUMN occurrence INTEGER")
+    if 'detection' not in columns:
+        c.execute("ALTER TABLE hazard_traceability ADD COLUMN detection INTEGER")
+    if 'mitigation_notes' not in columns:
+        c.execute("ALTER TABLE hazard_traceability ADD COLUMN mitigation_notes TEXT")
     
     # Revision History table
     c.execute('''
@@ -223,20 +247,20 @@ def generate_pdf(html_content):
 
 # --- DATABASE FUNCTIONS ---
 
-def add_user(username, password, is_admin=False):
+def add_user(username, password, email, is_admin=False):
     conn = sqlite3.connect('docsmate.db', timeout=15)
     c = conn.cursor()
-    c.execute('INSERT INTO users (username, password_hash, is_admin) VALUES (?,?,?)', (username, make_hashes(password), is_admin))
+    c.execute('INSERT INTO users (username, password_hash, email, is_admin) VALUES (?,?,?,?)', (username, make_hashes(password), email, is_admin))
     conn.commit()
     conn.close()
 
-def login_user(username, password):
+def login_user(email, password):
     conn = sqlite3.connect('docsmate.db', timeout=15)
     c = conn.cursor()
-    c.execute('SELECT * FROM users WHERE username =?', (username,))
+    c.execute('SELECT * FROM users WHERE email =?', (email,))
     data = c.fetchone()
     conn.close()
-    if data and check_hashes(password, data[2]):
+    if data and check_hashes(password, data[3]):
         return data
     return None
 
@@ -288,27 +312,27 @@ def update_project(project_id, name, description):
     conn.commit()
     conn.close()
 
-def add_team_member(name, email, project_id):
+def add_team_member(user_id, project_id):
     conn = sqlite3.connect('docsmate.db', timeout=15)
     c = conn.cursor()
-    c.execute('INSERT INTO team_members (name, email, project_id) VALUES (?,?,?)', (name, email, project_id))
+    c.execute('INSERT INTO team_members (user_id, project_id) VALUES (?,?)', (user_id, project_id))
     conn.commit()
     conn.close()
 
 def get_team_members(project_id):
     conn = sqlite3.connect('docsmate.db', timeout=15)
     c = conn.cursor()
-    c.execute('SELECT * FROM team_members WHERE project_id =?', (project_id,))
+    c.execute('''SELECT u.id, u.username, u.email FROM users u JOIN team_members tm ON u.id = tm.user_id WHERE tm.project_id = ?''', (project_id,))
     data = c.fetchall()
     conn.close()
     return data
 
-def create_document(project_id, doc_name, doc_type, content, version=1, status='Draft'):
+def create_document(project_id, item_name, doc_type, content, version=1, status='Draft'):
     conn = sqlite3.connect('docsmate.db', timeout=15)
     c = conn.cursor()
     now = datetime.now()
     c.execute('INSERT INTO documents (project_id, doc_name, doc_type, content, version, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)',
-              (project_id, doc_name, doc_type, json.dumps({"content": content}), version, status, now, now))
+              (project_id, item_name, doc_type, json.dumps({"content": content}), version, status, now, now))
     conn.commit()
     conn.close()
 
@@ -333,7 +357,8 @@ def update_document(doc_id, content, status, comments, author_id):
     c = conn.cursor()
     now = datetime.now()
     c.execute('UPDATE documents SET content =?, status = ?, updated_at =? WHERE id =?', (json.dumps({"content": content}), status, now, doc_id))
-    add_revision_history(doc_id, status, author_id, comments, c)
+    if status != "Draft":
+        add_revision_history(doc_id, status, author_id, comments, c)
     conn.commit()
     conn.close()
 
@@ -425,11 +450,11 @@ def update_template(template_id, name, content):
     conn.commit()
     conn.close()
 
-def add_hazard_traceability(project_id, hazard, cause, effect, risk_control_measure, verification):
+def add_hazard_traceability(project_id, hazard, cause, effect, risk_control_measure, verification, severity, occurrence, detection, mitigation_notes):
     conn = sqlite3.connect('docsmate.db', timeout=15)
     c = conn.cursor()
-    c.execute('INSERT INTO hazard_traceability (project_id, hazard, cause, effect, risk_control_measure, verification) VALUES (?,?,?,?,?,?)',
-              (project_id, hazard, cause, effect, risk_control_measure, verification))
+    c.execute('INSERT INTO hazard_traceability (project_id, hazard, cause, effect, risk_control_measure, verification, severity, occurrence, detection, mitigation_notes) VALUES (?,?,?,?,?,?,?,?,?,?)',
+              (project_id, hazard, cause, effect, risk_control_measure, verification, severity, occurrence, detection, mitigation_notes))
     conn.commit()
     conn.close()
 
@@ -511,22 +536,23 @@ def main():
         choice = st.sidebar.selectbox("Menu", menu)
         if choice == "Login":
             st.subheader("Login Section")
-            username = st.text_input("User Name")
+            email = st.text_input("Email")
             password = st.text_input("Password", type='password')
             if st.button("Login"):
-                user = login_user(username, password)
+                user = login_user(email, password)
                 if user:
                     st.session_state['logged_in'] = True
                     st.session_state['user_info'] = user
                     st.rerun()
                 else:
-                    st.warning("Incorrect Username/Password")
+                    st.warning("Incorrect Email/Password")
         elif choice == "SignUp":
             st.subheader("Create New Account")
             new_user = st.text_input("Username")
+            new_email = st.text_input("Email")
             new_password = st.text_input("Password", type='password')
             if st.button("Signup"):
-                add_user(new_user, new_password)
+                add_user(new_user, new_password, new_email)
                 st.success("You have successfully created an account")
                 st.info("Go to Login Menu to login")
     else:
@@ -552,11 +578,11 @@ def main():
             config_page()
         elif page == "App Logs":
             app_logs_page()
-        elif page == "Admin" and st.session_state['user_info'][3]:
+        elif page == "Admin" and st.session_state['user_info'][4]:
             admin_page()
         elif page == "Help":
             help_page()
-        elif page == "Admin" and not st.session_state['user_info'][3]:
+        elif page == "Admin" and not st.session_state['user_info'][4]:
             st.warning("You do not have admin privileges.")
 
 def projects_page():
@@ -598,22 +624,24 @@ def project_detail_page(project_id):
     project_details = get_project_details(project_id)
     st.header(f"Project: {project_details[1]}")
     st.write(project_details[2])
-    tabs = st.tabs(["Team", "Documents", "Risks", "Hazards", "Traceability", "Artifacts", "Metrics", "AI Audit"])
+    tabs = st.tabs(["Team", "Documents", "Code", "Reviews", "Hazards", "Traceability", "Artifacts", "Metrics", "AI Audit"])
     with tabs[0]:
         team_tab(project_id)
     with tabs[1]:
         documents_tab(project_id)
     with tabs[2]:
-        risks_tab(project_id)
+        code_tab(project_id)
     with tabs[3]:
-        hazard_traceability_tab(project_id)
+        reviews_tab(project_id)
     with tabs[4]:
-        traceability_tab(project_id)
+        hazard_traceability_tab(project_id)
     with tabs[5]:
-        artifacts_tab(project_id)
+        traceability_tab(project_id)
     with tabs[6]:
-        metrics_tab(project_id)
+        artifacts_tab(project_id)
     with tabs[7]:
+        metrics_tab(project_id)
+    with tabs[8]:
         ai_audit_tab(project_id)
 
 
@@ -624,7 +652,7 @@ def documents_tab(project_id):
     project_author_id = project_details[3] if project_details else 0
     project_author = get_user_by_id(project_author_id)
 
-    with st.expander("Create New Document"):
+    with st.expander("Create Document"):
         source_options = ["From Scratch", "From a Template", "From an Existing Document"]
         
         doc_type = None
@@ -660,14 +688,14 @@ def documents_tab(project_id):
             st.success("AI content generated. Review and create the document.")
             content_source = st.session_state.ai_generated_content
         
-        doc_name = st.text_input("Enter New Document Name", value=doc_name_suggestion)
+        item_name = st.text_input("Enter Document Name", value=doc_name_suggestion)
 
         if st.button("Create Document"):
-            if doc_name and doc_type:
-                create_document(project_id, doc_name, doc_type, content_source, version)
+            if item_name and doc_type:
+                create_document(project_id, item_name, doc_type, content_source, version)
                 if 'ai_generated_content' in st.session_state:
                     del st.session_state.ai_generated_content
-                st.success(f"Document '{doc_name}' created successfully!")
+                st.success(f"Document '{item_name}' created successfully!")
                 st.rerun()
             else:
                 st.error("Document Name and Type are required.")
@@ -676,10 +704,10 @@ def documents_tab(project_id):
     
     docs = get_documents(project_id)
     if not docs:
-        st.info("No documents in this project yet.")
+        st.info("No review items in this project yet.")
     else:
         doc_display_names = [f"{d[2]}(v{d[5]})" for d in docs]
-        selected_doc_name_display = st.selectbox("Select a document to edit", doc_display_names, key=f"doc_select_{project_id}")
+        selected_doc_name_display = st.selectbox("Select a review item to edit", doc_display_names, key=f"doc_select_{project_id}")
         
         if selected_doc_name_display:
             selected_doc_index = doc_display_names.index(selected_doc_name_display)
@@ -698,13 +726,16 @@ def documents_tab(project_id):
                         st.session_state.ai_assist_doc_id = doc_id if st.session_state.get('ai_assist_doc_id') != doc_id else None
                 with col3:
                     pdf_data = generate_pdf(content_data.get("content", ""))
-                    st.download_button(
-                        label="Export PDF",
-                        data=pdf_data,
-                        file_name=f"{doc_name}_v{version}.pdf",
-                        mime="application/pdf",
-                        key=f"export_pdf_{doc_id}"
-                    )
+                    if pdf_data:
+                        st.download_button(
+                            label="Export PDF",
+                            data=pdf_data,
+                            file_name=f"{doc_name}_v{version}.pdf",
+                            mime="application/pdf",
+                            key=f"export_pdf_{doc_id}"
+                        )
+                    else:
+                        st.warning("Couldn't generate PDF for this document.")
 
 
                 if st.session_state.get('ai_assist_doc_id') == doc_id:
@@ -736,41 +767,39 @@ def documents_tab(project_id):
                 content_from_editor = st_quill(value=content_data.get("content", ""), html=True, key=f"quill_editor_{doc_id}")
                 
                 st.write(f"**File:** {doc_name}(v{version}) | **Status:** {status}")
-                author_comment = st.text_input("Author comment to Reviewer")
-                reviewers = st.multiselect("Select Reviewers", [member[1] for member in get_team_members(project_id)])
-
-                if st.button("Save and Request Review", key=f"save_doc_{doc_id}"):
-                    update_document(doc_id, content_from_editor, "Review Request", author_comment, st.session_state['user_info'][0])
-                    st.success("Document saved and review requested!")
-                    st.rerun()
-
-                st.markdown("---")
                 
-                st.subheader("Reviews & Comments")
+                next_state = st.selectbox("Select Next State", ["Draft", "Request Review"])
+                
+                if next_state == "Request Review":
+                    author_comment = st.text_input("Author comment to Reviewer")
+                    
+                    users = get_all_users()
+                    user_map = {u[1]: u[0] for u in users}
+                    reviewers = st.multiselect("Select Reviewers", list(user_map.keys()))
+                else:
+                    author_comment = ""
+                    reviewers = []
 
-                
-                
-                with st.expander("Reviews"):
-                    reviews = get_reviews_for_document(doc_id)
-                    if reviews:
-                        for review in reviews:
-                            st.markdown(f"**Review by {review[2]} - Status: {review[1]}**")
-                            st.markdown(review[0], unsafe_allow_html=True)
-                            st.markdown("---")
+                if st.button("Save", key=f"save_doc_{doc_id}"):
+                    if next_state == "Request Review":
+                        if not reviewers:
+                            st.error("Please select at least one reviewer.")
+                        elif not author_comment:
+                            st.error("Please provide a comment for the reviewer.")
+                        else:
+                            update_document(doc_id, content_from_editor, "Review Request", author_comment, st.session_state['user_info'][0])
+                            for reviewer_name in reviewers:
+                                reviewer_id = user_map[reviewer_name]
+                                add_review(doc_id, reviewer_id, "", "Pending")
+                            st.success("Review item saved and review requested!")
+                            st.rerun()
                     else:
-                        st.info("No reviews for this document yet.")
-                
-                with st.form(key=f"review_form_{doc_id}", clear_on_submit=True):
-                    st.write("Add your review")
-                    comment = st.text_area("Comments")
-                    status = st.selectbox("Status", ["Comment", "Approved", "Needs Revision"])
-                    submit_review = st.form_submit_button("Submit Review")
-                    if submit_review:
-                        add_review(doc_id, st.session_state['user_info'][0], comment, status)
-                        st.success("Your review has been submitted.")
+                        update_document(doc_id, content_from_editor, "Draft", author_comment, st.session_state['user_info'][0])
+                        st.success("Review item saved as draft!")
                         st.rerun()
 
                 st.markdown("---")
+                
                 st.subheader("Revision History")
                 history = get_revision_history(doc_id)
                 if history:
@@ -778,7 +807,93 @@ def documents_tab(project_id):
                     df['Author'] = df['Author ID'].apply(get_user_by_id)
                     st.dataframe(df[['Status', 'Author', 'Timestamp', 'Comments']])
                 else:
-                    st.info("No revision history for this document yet.")
+                    st.info("No revision history for this review item yet.")
+
+def colorize_diff_to_html(diff_text):
+    """Converts diff text to colorized HTML."""
+    import html
+    html_lines = []
+    for line in diff_text.splitlines():
+        escaped_line = html.escape(line)
+        if line.startswith('+') and not line.startswith('+++'):
+            html_lines.append(f'<span style="color: #28a745; background-color: #e6ffed;">{escaped_line}</span>')
+        elif line.startswith('-') and not line.startswith('---'):
+            html_lines.append(f'<span style="color: #dc3545; background-color: #ffeef0;">{escaped_line}</span>')
+        elif line.startswith('@@'):
+            html_lines.append(f'<span style="color: #17a2b8;">{escaped_line}</span>')
+        elif line.startswith('diff --git'):
+            html_lines.append(f'<span style="font-weight: bold;">{escaped_line}</span>')
+        else:
+            html_lines.append(f'<span>{escaped_line}</span>')
+    return '<pre style="background-color: #f6f8fa; border: 1px solid #ced4da; border-radius: 5px; padding: 10px; font-family: monospace;"><code>' + '\n'.join(html_lines) + '</code></pre>'
+
+def code_tab(project_id):
+    st.subheader("Submit Code for Review")
+
+    diff_input = ""
+    uploaded_file = st.file_uploader("Upload a Diff File")
+    if uploaded_file:
+        diff_input = uploaded_file.getvalue().decode("utf-8")
+    
+    diff_text_area = st.text_area("Paste Git Diff Output Here", value=diff_input if diff_input else "", height=300)
+
+    final_diff = diff_text_area or diff_input
+
+    if final_diff:
+        with st.form("create_code_review_form"):
+            item_name = st.text_input("Review Item Name")
+            submitted = st.form_submit_button("Create Code Review Item")
+            if submitted:
+                if item_name:
+                    content = {"raw_diff": final_diff}
+                    create_document(project_id, item_name, "Code Review", content, status="Review Request")
+                    st.success(f"Code Review Item '{item_name}' created successfully!")
+                    st.rerun()
+                else:
+                    st.error("Please provide a name for the review item.")
+
+    st.markdown("---")
+    st.subheader("View Existing Code Reviews")
+    docs = get_documents(project_id)
+    code_reviews = [d for d in docs if d[3] == "Code Review"]
+    if not code_reviews:
+        st.info("No code review items in this project yet.")
+    else:
+        review_item_names = [d[2] for d in code_reviews]
+        selected_item_name = st.selectbox("Select a code review item to view diff", review_item_names)
+        if selected_item_name:
+            selected_item = next((d for d in code_reviews if d[2] == selected_item_name), None)
+            if selected_item:
+                content_data = json.loads(selected_item[4])
+                payload = content_data.get("content", {})
+                if isinstance(payload, str):
+                    try:
+                        payload = json.loads(payload)
+                    except Exception:
+                        payload = {}
+                
+                raw_diff = payload.get("raw_diff")
+                if raw_diff:
+                    diff_html = colorize_diff_to_html(raw_diff)
+                    st.components.v1.html(diff_html, height=600, scrolling=True)
+                else:  # Fallback for old format
+                    code1 = payload.get("code1", "")
+                    code2 = payload.get("code2", "")
+                    d = difflib.HtmlDiff()
+                    diff_html = d.make_table(code1.splitlines(), code2.splitlines())
+                    st.components.v1.html(diff_html, height=600, scrolling=True)
+
+                # Add Your Review section
+                st.subheader("Add Your Review")
+                with st.form(key=f"code_review_form_{selected_item[0]}", clear_on_submit=True):
+                    comment = st.text_area("Comments")
+                    status = st.selectbox("Status", ["Comment", "Approved", "Needs Revision"])
+                    submit_review = st.form_submit_button("Submit Review")
+                    if submit_review:
+                        add_review(selected_item[0], st.session_state['user_info'][0], comment, status)
+                        st.success("Your review has been submitted.")
+                        st.rerun()
+
 
 
 def templates_page():
@@ -863,58 +978,22 @@ def team_tab(project_id):
     st.subheader("Team Members")
     team_members = get_team_members(project_id)
     if team_members:
-        df = pd.DataFrame(team_members, columns=['ID', 'Name', 'Email', 'Project ID'])
-        st.dataframe(df[['Name', 'Email']])
+        df = pd.DataFrame(team_members, columns=['ID', 'Username', 'Email'])
+        st.dataframe(df[['Username', 'Email']])
     
     with st.expander("Add New Team Member"):
         with st.form("new_team_member_form", clear_on_submit=True):
-            member_name = st.text_input("Name")
-            member_email = st.text_input("Email")
+            users = get_all_users()
+            user_map = {u[1]: u[0] for u in users}
+            selected_user = st.selectbox("Select User", list(user_map.keys()))
             submitted = st.form_submit_button("Add Member")
             if submitted:
-                add_team_member(member_name, member_email, project_id)
+                user_id = user_map[selected_user]
+                add_team_member(user_id, project_id)
                 st.success("Team member added!")
                 st.rerun()
 
-def risks_tab(project_id):
-    project_details = get_project_details(project_id)
-    project_description = project_details[2] if project_details else ""
-    
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.subheader("Risk Management")
-    
-    
-    
 
-    risks = get_risks(project_id)
-    if risks:
-        df = pd.DataFrame(risks, columns=['ID', 'Project ID', 'Failure Mode', 'Severity', 'Occurrence', 'Detection', 'RPN', 'Comments', 'Status'])
-        df.index = [f"RISK_{i+1}" for i in range(len(df))]
-        
-        # Configure columns for data_editor
-        column_config = {
-            "RPN": st.column_config.NumberColumn("RPN", disabled=True),
-            "Status": st.column_config.SelectboxColumn("Status", options=config.RISK_STATUS_OPTIONS)
-        }
-        
-        st.data_editor(df[['Failure Mode', 'Severity', 'Occurrence', 'Detection', 'RPN', 'Comments', 'Status']], column_config=column_config)
-    else:
-        st.info("No risks recorded for this project yet.")
-
-    with st.expander("Add New Risk Manually"):
-        with st.form("new_risk_form", clear_on_submit=True):
-            failure_mode = st.text_area("Failure Mode")
-            sev = st.number_input("Severity (1-10)", 1, 10, 1)
-            occ = st.number_input("Occurrence (1-10)", 1, 10, 1)
-            det = st.number_input("Detection (1-10)", 1, 10, 1)
-            comments = st.text_area("Comments / Mitigation")
-            submitted = st.form_submit_button("Add Risk")
-            if submitted:
-                rpn = sev * occ * det
-                add_risk(project_id, failure_mode, sev, occ, det, rpn, comments)
-                st.success("Risk added!")
-                st.rerun()
 
 def traceability_tab(project_id):
     st.subheader("Traceability Matrix")
@@ -943,21 +1022,25 @@ def hazard_traceability_tab(project_id):
     if hazard_assessment_type == "Medical (IEC 62304)":
         hazard_links = get_hazard_traceability(project_id)
         if hazard_links:
-            df = pd.DataFrame(hazard_links, columns=['ID', 'Project ID', 'Hazard', 'Cause', 'Effect', 'Risk Control Measure', 'Verification'])
-            st.data_editor(df[['Hazard', 'Cause', 'Effect', 'Risk Control Measure', 'Verification']])
+            df = pd.DataFrame(hazard_links, columns=['ID', 'Project ID', 'Hazard/Failure', 'Cause', 'Effect', 'Control Measures', 'Verification Notes', 'Severity', 'Occurrence', 'Detection', 'Mitigation Notes'])
+            st.data_editor(df[['Hazard/Failure', 'Cause', 'Effect', 'Control Measures', 'Verification Notes', 'Severity', 'Occurrence', 'Detection', 'Mitigation Notes']])
         else:
             st.info("No hazard traceability links recorded for this project yet.")
 
         with st.expander("Add New Hazard Traceability"):
             with st.form("new_hazard_traceability_form", clear_on_submit=True):
-                hazard = st.text_input("Hazard")
+                hazard = st.text_input("Hazard/Failure")
                 cause = st.text_input("Cause")
                 effect = st.text_input("Effect")
-                risk_control = st.text_input("Risk Control Measure")
-                verification = st.text_input("Verification")
+                risk_control = st.text_input("Control Measures")
+                verification = st.text_input("Verification Notes")
+                sev = st.number_input("Severity (1-10)", 1, 10, 1)
+                occ = st.number_input("Occurrence (1-10)", 1, 10, 1)
+                det = st.number_input("Detection (1-10)", 1, 10, 1)
+                mitigation_notes = st.text_area("Mitigation Notes")
                 submitted = st.form_submit_button("Add Hazard")
                 if submitted:
-                    add_hazard_traceability(project_id, hazard, cause, effect, risk_control, verification)
+                    add_hazard_traceability(project_id, hazard, cause, effect, risk_control, verification, sev, occ, det, mitigation_notes)
                     st.success("Hazard traceability link added!")
                     st.rerun()
     
@@ -1025,10 +1108,17 @@ def artifacts_tab(project_id):
         if st.button("Download All"):
             zip_buffer = BytesIO()
             with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
+                added, skipped = 0, 0
                 for index, row in df.iterrows():
                     pdf_data = generate_pdf(json.loads(row['content']).get("content", ""))
-                    zip_file.writestr(f"{row['doc_name']}_v{row['version']}.pdf", pdf_data)
+                    if pdf_data:
+                        zip_file.writestr(f"{row['doc_name']}_v{row['version']}.pdf", pdf_data)
+                        added += 1
+                    else:
+                        skipped += 1
             
+            if skipped:
+                st.warning(f"{skipped} document(s) could not be converted to PDF and were skipped.")
             st.download_button(
                 label="Download All as ZIP",
                 data=zip_buffer.getvalue(),
@@ -1060,6 +1150,107 @@ def ai_audit_tab(project_id):
     st.info("AI Audit functionality coming soon.")
 
 
+def get_reviews_for_user(user_id):
+    conn = sqlite3.connect('docsmate.db', timeout=15)
+    c = conn.cursor()
+    c.execute('''
+        SELECT d.id, d.doc_name, p.name, r.status
+        FROM documents d
+        JOIN reviews r ON d.id = r.document_id
+        JOIN projects p ON d.project_id = p.id
+        WHERE r.reviewer_id = ?
+    ''', (user_id,))
+    data = c.fetchall()
+    conn.close()
+    return data
+
+def get_review_history(user_id):
+    conn = sqlite3.connect('docsmate.db', timeout=15)
+    c = conn.cursor()
+    c.execute('''
+        SELECT d.doc_name, d.version, r.timestamp, r.status, r.comments
+        FROM documents d
+        JOIN revision_history r ON d.id = r.doc_id
+        WHERE r.author_id = ?
+    ''', (user_id,))
+    data = c.fetchall()
+    conn.close()
+    return data
+
+
+
+def get_all_reviews_for_project(project_id):
+    conn = sqlite3.connect('docsmate.db', timeout=15)
+    c = conn.cursor()
+    c.execute('''
+        SELECT d.doc_name, d.version, r.timestamp, r.status, u.username, r.comments
+        FROM documents d
+        JOIN revision_history r ON d.id = r.doc_id
+        JOIN users u ON r.author_id = u.id
+        WHERE d.project_id = ?
+    ''', (project_id,))
+    data = c.fetchall()
+    conn.close()
+    return data
+
+def reviews_tab(project_id):
+    st.subheader("Reviews")
+    review_choice = st.radio("", ["My Reviews", "All Reviews"])
+
+    if review_choice == "My Reviews":
+        reviews = get_reviews_for_user(st.session_state['user_info'][0])
+        if not reviews:
+            st.info("You have no documents to review.")
+        else:
+            with st.expander("Review Items", expanded=True):
+                review_options = {f"{r[1]} (v{get_document_details(r[0])[5]}) - Status: {r[3]}" : r[0] for r in reviews}
+                selected_review_label = st.selectbox("Select a review to comment on:", list(review_options.keys()))
+
+                if selected_review_label:
+                    doc_id = review_options[selected_review_label]
+                    doc_details = get_document_details(doc_id)
+                    if doc_details:
+                        if doc_details[3] == "Code Review": # Check if it's a code review
+                            content_data = json.loads(doc_details[4])
+                            payload = content_data.get("content", {})
+                            if isinstance(payload, str):
+                                try: payload = json.loads(payload)
+                                except: payload = {}
+                            
+                            raw_diff = payload.get("raw_diff")
+                            if raw_diff:
+                                diff_html = colorize_diff_to_html(raw_diff)
+                                st.components.v1.html(diff_html, height=600, scrolling=True)
+                            else: # Fallback for old format
+                                code1 = payload.get("code1", "")
+                                code2 = payload.get("code2", "")
+                                d = difflib.HtmlDiff()
+                                diff_html = d.make_table(code1.splitlines(), code2.splitlines())
+                                st.components.v1.html(diff_html, height=600, scrolling=True)
+                        else:
+                            content_data = json.loads(doc_details[4])
+                            st.markdown(content_data.get("content", ""), unsafe_allow_html=True)
+
+            if selected_review_label:
+                st.subheader("Add Your Review")
+                with st.form(key="review_form", clear_on_submit=True):
+                    comment = st.text_area("Comments")
+                    new_status = st.selectbox("Status", ["Comment", "Approved", "Needs Revision"])
+                    submit_review = st.form_submit_button("Submit Review")
+                    if submit_review:
+                        doc_id = review_options[selected_review_label]
+                        add_review(doc_id, st.session_state['user_info'][0], comment, new_status)
+                        st.success("Your review has been submitted.")
+                        st.rerun()
+
+    elif review_choice == "All Reviews":
+        all_reviews = get_all_reviews_for_project(project_id)
+        if not all_reviews:
+            st.info("No reviews for this project yet.")
+        else:
+            df = pd.DataFrame(all_reviews, columns=['Review Item', 'Version', 'Date & Timestamp', 'Document Status', 'Reviewer', 'Comments'])
+            st.dataframe(df)
+
 def admin_page():
     st.header("Admin Dashboard")
     st.subheader("Manage Users")
@@ -1087,7 +1278,7 @@ def help_page():
 
     ## Getting Started
 
-    To begin, create a new project from the sidebar. Once a project is created, you can select it from the dropdown to access its details and start managing your documents and other resources.
+    To begin, you need to sign up with a unique username and email. Once logged in, you can create a new project from the sidebar. Once a project is created, you can select it from the dropdown to access its details and start managing your documents and other resources.
 
     ## Key Features
 
@@ -1095,21 +1286,26 @@ def help_page():
 
     * **Create New Project**: Use the form in the sidebar to create a new project.
     * **Edit Project**: Select a project and use the "Edit Current Project" section to update its name and description.
+    * **Team**: Add registered users of the system to your project team.
+    * **Documents**: Manage all your project documents.
+    * **Code**: A dedicated space for code reviews with a diff viewer.
+    * **Reviews**: A dedicated space for document and code reviews.
+        * **My Reviews**: View items assigned to you for review. Select an item to see the content and add your comments.
+        * **All Reviews**: See a complete history of all reviews for the project.
+    * **Hazards**: A combined table for hazard analysis and risk management, tailored to different standards like Medical (IEC 62304), Automotive (ISO 26262), and General (IEC 61508).
+    * **Traceability**: Manage traceability between requirements, design, and tests.
+    * **Artifacts**: Download all approved documents as a single zip file.
+    * **Metrics**: View project metrics and charts.
+    * **AI Audit**: (Coming Soon) Audit trail for AI-assisted actions.
 
-    ### Documents
+    ### Review Items (Documents and Code)
 
-    * **Create New Document**: You can create a new document from scratch, from a template, from an existing document, or with the help of AI.
-    * **Document Editor**: Use the rich-text editor to create and format your documents.
+    * **Create New Review Item**: You can create a new document from scratch, from a template, from an existing document, or with the help of AI. You can also create code review items in the "Code" tab.
+    * **Editor**: Use the rich-text editor to create and format your documents.
     * **AI Assist**: Get help from the AI to improve your writing, summarize content, or generate new ideas.
-    * **Reviews & Comments**: Collaborate with your team by requesting reviews and adding comments.
-    * **Revision History**: Track all changes made to a document over time.
+    * **Request Review**: When your item is ready, you can request a review from team members.
+    * **Revision History**: Track all changes made to an item over time.
     * **Export to PDF**: Download a PDF version of your document for easy sharing and archiving.
-
-    ### Risks
-
-    * **Risk Management**: Identify, assess, and mitigate project risks.
-    * **AI Risk Assist**: Use the AI to automatically identify potential risks based on your project's description.
-    * **FMEA Table**: Manage your risks in a familiar FMEA (Failure Mode and Effects Analysis) format.
 
     ### Templates
 
@@ -1123,9 +1319,43 @@ def help_page():
     ### Admin
 
     * **User Management**: Admins can view and manage all users in the system.
-    """)
+    """
+    )
+
+
+def migrate_code_review_content():
+    """Migrate legacy code review rows where content was double-encoded JSON."""
+    conn = sqlite3.connect('docsmate.db', timeout=15)
+    c = conn.cursor()
+    c.execute("SELECT id, content FROM documents WHERE doc_type='Code Review'")
+    rows = c.fetchall()
+    updated = 0
+    for rid, raw in rows:
+        try:
+            data = json.loads(raw)
+            payload = data.get("content")
+            if isinstance(payload, str):
+                try:
+                    payload_dict = json.loads(payload)
+                    # update row with normalized dict
+                    new_content = json.dumps({"content": payload_dict})
+                    c.execute("UPDATE documents SET content=? WHERE id=?", (new_content, rid))
+                    updated += 1
+                except Exception:
+                    pass
+        except Exception:
+            pass
+    conn.commit()
+    conn.close()
+    return updated
+
 
 if __name__ == '__main__':
     init_db()
+    try:
+        migrated = migrate_code_review_content()
+        if migrated:
+            print(f"Migrated {migrated} legacy code review item(s).")
+    except Exception as e:
+        print(f"Migration skipped due to error: {e}")
     main()
-
