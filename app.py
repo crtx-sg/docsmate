@@ -7,7 +7,6 @@ import hashlib
 import json
 import pandas as pd
 from datetime import datetime
-from streamlit_quill import st_quill
 import os
 import config  # Import the configuration file
 import ai_integration # Import the AI integration module
@@ -17,6 +16,8 @@ from io import BytesIO
 import zipfile
 import matplotlib.pyplot as plt
 import difflib
+from streamlit_quill import st_quill
+
 
 # --- DATABASE SETUP ---
 
@@ -236,6 +237,16 @@ def show_logs(prompt, response):
             st.code(response, language='html')
 
 def generate_pdf(html_content):
+    """Generates a PDF from HTML content and returns its binary data."""
+    pdf_file = BytesIO()
+    pisa_status = pisa.CreatePDF(BytesIO(html_content.encode('utf-8')), dest=pdf_file)
+    if pisa_status.err:
+        return None
+    pdf_file.seek(0)
+    return pdf_file.getvalue()
+
+
+# --- DATABASE FUNCTIONS ---
     """Generates a PDF from HTML content and returns its binary data."""
     pdf_file = BytesIO()
     pisa_status = pisa.CreatePDF(BytesIO(html_content.encode('utf-8')), dest=pdf_file)
@@ -791,11 +802,11 @@ def documents_tab(project_id):
                             for reviewer_name in reviewers:
                                 reviewer_id = user_map[reviewer_name]
                                 add_review(doc_id, reviewer_id, "", "Pending")
-                            st.success("Review item saved and review requested!")
+                            st.success("Document saved and review requested!")
                             st.rerun()
                     else:
                         update_document(doc_id, content_from_editor, "Draft", author_comment, st.session_state['user_info'][0])
-                        st.success("Review item saved as draft!")
+                        st.success("Document saved as draft!")
                         st.rerun()
 
                 st.markdown("---")
@@ -841,7 +852,7 @@ def code_tab(project_id):
 
     if final_diff:
         with st.form("create_code_review_form"):
-            item_name = st.text_input("Review Item Name")
+            item_name = st.text_input("Code Review Item Name")
             submitted = st.form_submit_button("Create Code Review Item")
             if submitted:
                 if item_name:
@@ -1301,7 +1312,7 @@ def help_page():
     ### Review Items (Documents and Code)
 
     * **Create New Review Item**: You can create a new document from scratch, from a template, from an existing document, or with the help of AI. You can also create code review items in the "Code" tab.
-    * **Editor**: Use the rich-text editor to create and format your documents.
+    * **Editor**: Use the rich-text editor to create and format your documents. While the editor does not have built-in table creation controls, you can create tables using external tools and paste their HTML or Markdown syntax directly into the editor. For example, you can use online Markdown table generators to create the table structure, then copy and paste the raw Markdown into the editor. The editor will render basic HTML tables.
     * **AI Assist**: Get help from the AI to improve your writing, summarize content, or generate new ideas.
     * **Request Review**: When your item is ready, you can request a review from team members.
     * **Revision History**: Track all changes made to an item over time.

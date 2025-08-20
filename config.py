@@ -18,6 +18,9 @@ DOCUMENT_TYPES = [
     "Code Review"
 ]
 
+# --- EDITOR CONFIGURATION ---
+EDITOR_TYPE = 'quill' # 'markdown' or 'quill'
+
 # --- RISK STATUS OPTIONS ---
 RISK_STATUS_OPTIONS = ["New", "Ignore", "Minor", "Major", "Severe"]
 
