@@ -13,6 +13,7 @@ import ai_integration # Import the AI integration module
 import re
 from xhtml2pdf import pisa
 from io import BytesIO
+import knowledge_base
 import zipfile
 import matplotlib.pyplot as plt
 import difflib
@@ -570,7 +571,7 @@ def main():
         st.sidebar.subheader(f"Welcome {st.session_state['user_info'][1]}")
         st.session_state.show_logs = st.sidebar.toggle("Show App Logs", value=False)
         
-        nav_options = ["Projects", "Templates", "Configuration", "Admin", "Help"]
+        nav_options = ["Projects", "Templates", "Knowledge Base", "Admin", "Help"]
         if st.session_state.show_logs:
             nav_options.append("App Logs")
 
@@ -585,8 +586,8 @@ def main():
             projects_page()
         elif page == "Templates":
             templates_page()
-        elif page == "Configuration":
-            config_page()
+        elif page == "Knowledge Base":
+            knowledge_base_page()
         elif page == "App Logs":
             app_logs_page()
         elif page == "Admin" and st.session_state['user_info'][4]:
@@ -967,23 +968,73 @@ def templates_page():
                 st.success("Template updated successfully!")
                 st.rerun()
 
-def config_page():
-    st.header("AI Configuration and Knowledge Base")
-    st.subheader("Local Knowledge Base")
-    st.write("Upload documents to build the local knowledge base for the RAG system.")
-    uploaded_files = st.file_uploader("Upload up to 15 documents", accept_multiple_files=True, type=['pdf', 'txt', 'md', 'html'])
+def knowledge_base_page():
+    st.header("Knowledge Base Management")
+
+    # --- KNOWLEDGE BASE CREATION ---
+    st.subheader("Knowledge Base Creation")
+    st.write("Upload documents and trigger the creation of the knowledge base. This will process the uploaded files and scrape predefined websites.")
+    
+    uploaded_files = st.file_uploader("Upload PDFs and Markdown files", accept_multiple_files=True, type=['pdf', 'md'])
+    
     if uploaded_files:
-        if len(uploaded_files) > 15:
-            st.error("You can upload a maximum of 15 files.")
+        # Save uploaded files to the upload directory
+        for uploaded_file in uploaded_files:
+            file_path = os.path.join(config.UPLOAD_DIRECTORY, uploaded_file.name)
+            with open(file_path, "wb") as f:
+                f.write(uploaded_file.getbuffer())
+        st.success(f"{len(uploaded_files)} file(s) ready for processing.")
+
+    if st.button("Create Knowledge Base"):
+        with st.spinner("Creating knowledge base... This may take a while."):
+            # 1. Scrape websites
+            scraped_text = knowledge_base.scrape_websites(config.WEBSITES_TO_SCRAPE)
+            
+            # 2. Process uploaded files
+            uploaded_text = knowledge_base.process_uploaded_files(config.UPLOAD_DIRECTORY)
+            
+            # 3. Combine text
+            full_text = scraped_text + uploaded_text
+            
+            # 4. Chunk text
+            chunks = knowledge_base.chunk_text(full_text)
+            
+            # 5. Create and store embeddings
+            st.session_state.vector_store = knowledge_base.create_and_store_embeddings(chunks)
+            
+            st.success("Knowledge base created successfully!")
+
+    st.markdown("---")
+
+    # --- CHAT INTERFACE ---
+    st.subheader("Chat with your Knowledge Base")
+
+    if 'chat_history' not in st.session_state:
+        st.session_state.chat_history = []
+
+    for message in st.session_state.chat_history:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    if prompt := st.chat_input("Ask a question to the knowledge base"):
+        st.session_state.chat_history.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        if 'vector_store' not in st.session_state:
+            st.warning("Please create the knowledge base first.")
         else:
-            for uploaded_file in uploaded_files:
-                file_path = os.path.join(config.UPLOAD_DIRECTORY, uploaded_file.name)
-                with open(file_path, "wb") as f:
-                    f.write(uploaded_file.getbuffer())
-            st.success(f"{len(uploaded_files)} file(s) uploaded successfully!")
-            if st.button("Process Uploaded Documents"):
-                with st.spinner("Processing documents... This may take a moment."):
-                    st.success("Documents processed and added to the knowledge base.")
+            with st.chat_message("assistant"):
+                with st.spinner("Thinking..."):
+                    # 1. Query the knowledge base
+                    docs = knowledge_base.query_knowledge_base(prompt, st.session_state.vector_store)
+                    
+                    # 2. Get answer from LLM
+                    response = knowledge_base.get_answer_from_llm(prompt, docs)
+                    
+                    st.markdown(response)
+            
+            st.session_state.chat_history.append({"role": "assistant", "content": response})
 
 def team_tab(project_id):
     st.subheader("Team Members")
