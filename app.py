@@ -202,6 +202,51 @@ def init_db():
     # SIL Tables
     c.execute('''CREATE TABLE IF NOT EXISTS sil_master (id INTEGER PRIMARY KEY, project_id INTEGER, hazard_description TEXT, consequence TEXT, exposure TEXT, avoidance TEXT, probability TEXT, sil_rating TEXT)''')
 
+    # Training table
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS training (
+            id INTEGER PRIMARY KEY,
+            project_id INTEGER,
+            question TEXT,
+            user_answer TEXT,
+            actual_answer TEXT,
+            user_id INTEGER,
+            timestamp DATETIME,
+            FOREIGN KEY(project_id) REFERENCES projects(id),
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        )
+    ''')
+
+    # Audit Gaps table
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS audit_gaps (
+            id INTEGER PRIMARY KEY,
+            project_id INTEGER,
+            audit_reference TEXT,
+            document_name TEXT,
+            comments TEXT,
+            status TEXT,
+            audit_timestamp DATETIME,
+            user_data TEXT,
+            user_query TEXT,
+            context TEXT,
+            FOREIGN KEY(project_id) REFERENCES projects(id)
+        )
+    ''')
+    # Check and add 'audit_reference' column for backward compatibility
+    c.execute("PRAGMA table_info(audit_gaps)")
+    columns = [column[1] for column in c.fetchall()]
+    if 'audit_reference' not in columns:
+        c.execute("ALTER TABLE audit_gaps ADD COLUMN audit_reference TEXT")
+    if 'audit_timestamp' not in columns:
+        c.execute("ALTER TABLE audit_gaps ADD COLUMN audit_timestamp DATETIME")
+    if 'user_data' not in columns:
+        c.execute("ALTER TABLE audit_gaps ADD COLUMN user_data TEXT")
+    if 'user_query' not in columns:
+        c.execute("ALTER TABLE audit_gaps ADD COLUMN user_query TEXT")
+    if 'context' not in columns:
+        c.execute("ALTER TABLE audit_gaps ADD COLUMN context TEXT")
+
 
     conn.commit()
     conn.close()
@@ -338,6 +383,13 @@ def get_team_members(project_id):
     data = c.fetchall()
     conn.close()
     return data
+
+def delete_team_member(user_id, project_id):
+    conn = sqlite3.connect('docsmate.db', timeout=15)
+    c = conn.cursor()
+    c.execute('DELETE FROM team_members WHERE user_id = ? AND project_id = ?', (user_id, project_id))
+    conn.commit()
+    conn.close()
 
 def create_document(project_id, item_name, doc_type, content, version=1, status='Draft'):
     conn = sqlite3.connect('docsmate.db', timeout=15)
@@ -532,6 +584,71 @@ def get_sil_entries(project_id):
     conn.close()
     return data
 
+def add_audit_gap(project_id, audit_reference, document_name, comments, status, timestamp, user_data, user_query, context):
+    conn = sqlite3.connect('docsmate.db', timeout=15)
+    c = conn.cursor()
+    c.execute("INSERT INTO audit_gaps (project_id, audit_reference, document_name, comments, status, audit_timestamp, user_data, user_query, context) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+              (project_id, audit_reference, document_name, comments, status, timestamp, user_data, user_query, context))
+    conn.commit()
+    conn.close()
+
+def get_audit_gaps(project_id):
+    conn = sqlite3.connect('docsmate.db', timeout=15)
+    c = conn.cursor()
+    c.execute("SELECT id, project_id, audit_reference, document_name, comments, status, audit_timestamp, user_data, user_query, context FROM audit_gaps WHERE project_id = ?", (project_id,))
+    data = c.fetchall()
+    conn.close()
+    return data
+
+def get_audit_references(project_id):
+    conn = sqlite3.connect('docsmate.db', timeout=15)
+    c = conn.cursor()
+    c.execute("SELECT DISTINCT audit_reference FROM audit_gaps WHERE project_id = ?", (project_id,))
+    data = [row[0] for row in c.fetchall()]
+    conn.close()
+    return data
+
+def get_audit_gaps_by_reference(project_id, audit_reference):
+    conn = sqlite3.connect('docsmate.db', timeout=15)
+    c = conn.cursor()
+    c.execute("SELECT id, project_id, audit_reference, document_name, comments, status, audit_timestamp, user_data, user_query, context FROM audit_gaps WHERE project_id = ? AND audit_reference = ?", (project_id, audit_reference))
+    data = c.fetchall()
+    conn.close()
+    return data
+
+def add_training_question(project_id, question, actual_answer, user_id):
+    conn = sqlite3.connect('docsmate.db', timeout=15)
+    c = conn.cursor()
+    now = datetime.now()
+    c.execute('INSERT INTO training (project_id, question, actual_answer, user_id, timestamp) VALUES (?,?,?,?,?)',
+              (project_id, question, actual_answer, user_id, now))
+    conn.commit()
+    conn.close()
+
+def get_training_questions(project_id, user_id):
+    conn = sqlite3.connect('docsmate.db', timeout=15)
+    c = conn.cursor()
+    c.execute('SELECT * FROM training WHERE project_id =? AND user_id =? AND user_answer IS NULL', (project_id, user_id))
+    data = c.fetchall()
+    conn.close()
+    return data
+
+def update_training_answer(question_id, user_answer):
+    conn = sqlite3.connect('docsmate.db', timeout=15)
+    c = conn.cursor()
+    c.execute('UPDATE training SET user_answer =? WHERE id =?', (user_answer, question_id))
+    conn.commit()
+    conn.close()
+
+def get_training_history(project_id, user_id):
+    conn = sqlite3.connect('docsmate.db', timeout=15)
+    c = conn.cursor()
+    c.execute('SELECT * FROM training WHERE project_id =? AND user_id =? AND user_answer IS NOT NULL', (project_id, user_id))
+    data = c.fetchall()
+    conn.close()
+    return data
+
+
 # --- STREAMLIT APP ---
 
 def main():
@@ -571,7 +688,7 @@ def main():
         st.sidebar.subheader(f"Welcome {st.session_state['user_info'][1]}")
         st.session_state.show_logs = st.sidebar.toggle("Show App Logs", value=False)
         
-        nav_options = ["Projects", "Templates", "Knowledge Base", "Admin", "Help"]
+        nav_options = ["Dashboard", "Projects", "Templates", "Knowledge Base", "Admin", "Help"]
         if st.session_state.show_logs:
             nav_options.append("App Logs")
 
@@ -582,7 +699,13 @@ def main():
             st.session_state['user_info'] = None
             st.rerun()
 
-        if page == "Projects":
+        st.sidebar.markdown("""---
+        v1.0, Coherentix Labs
+        """)
+
+        if page == "Dashboard":
+            dashboard_page()
+        elif page == "Projects":
             projects_page()
         elif page == "Templates":
             templates_page()
@@ -597,6 +720,99 @@ def main():
         elif page == "Admin" and not st.session_state['user_info'][4]:
             st.warning("You do not have admin privileges.")
 
+def dashboard_page():
+    st.header(f"Welcome, {st.session_state['user_info'][1]}!")
+
+    user_id = st.session_state['user_info'][0]
+
+    # --- Quick Stats ---
+    st.subheader("Quick Stats")
+    col1, col2, col3, col4 = st.columns(4)
+
+    accessible_projects = get_user_accessible_projects(user_id)
+    with col1:
+        st.metric("Total Projects Accessible", len(accessible_projects))
+
+    pending_reviews = get_reviews_for_user(user_id)
+    pending_review_count = sum(1 for r in pending_reviews if r[3] == 'Pending')
+    with col2:
+        st.metric("Documents Awaiting My Review", pending_review_count)
+
+    pending_training_questions = get_training_questions(user_id, user_id) # Assuming user_id is also project_id for simplicity or adjust as needed
+    with col3:
+        st.metric("Pending Training Questions", len(pending_training_questions))
+    
+    training_history = get_training_history(user_id, user_id)
+    if training_history:
+        df_training = pd.DataFrame(training_history, columns=['ID', 'Project ID', 'Question', 'User Answer', 'Actual Answer', 'User ID', 'Timestamp'])
+        total_correct = df_training['User Answer'].eq(df_training['Actual Answer']).sum()
+        total_questions = len(df_training)
+        overall_score = f"{total_correct}/{total_questions}" if total_questions > 0 else "N/A"
+        overall_percentage = f"({total_correct/total_questions:.0%})" if total_questions > 0 else ""
+    else:
+        overall_score = "N/A"
+        overall_percentage = ""
+
+    with col4:
+        st.metric("My Overall Training Score", f"{overall_score} {overall_percentage}")
+
+    st.markdown("---")
+
+    # --- My Action Items / To-Do List ---
+    st.subheader("My Action Items")
+    
+    if pending_review_count > 0:
+        st.write("#### Documents Awaiting Your Review:")
+        for review in pending_reviews:
+            if review[3] == 'Pending':
+                doc_details = get_document_details(review[0])
+                if doc_details:
+                    st.info(f"**Project:** {review[2]} - **Document:** {review[1]} (Status: {review[3]})")
+                    # Provide a way to navigate to the review, perhaps by setting session state
+                    # This would require a more complex navigation handling or direct link if possible
+    else:
+        st.info("No documents currently awaiting your review.")
+
+    if len(pending_training_questions) > 0:
+        st.write("#### Pending Training Questions:")
+        st.info(f"You have {len(pending_training_questions)} unanswered training questions. Go to the **Training** tab in your project to answer them.")
+    else:
+        st.info("No pending training questions.")
+
+    st.markdown("---")
+
+    # --- My Projects Overview ---
+    st.subheader("My Projects Overview")
+    if accessible_projects:
+        project_data = []
+        for p in accessible_projects:
+            project_id, name, description, created_by_user_id = p
+            creator_name = get_user_by_id(created_by_user_id)
+            project_data.append({
+                "ID": project_id,
+                "Name": name,
+                "Description": description,
+                "Created By": creator_name
+            })
+        df_projects = pd.DataFrame(project_data)
+        st.dataframe(df_projects, use_container_width=True)
+    else:
+        st.info("You are not associated with any projects yet. Create a new project from the sidebar.")
+
+    st.markdown("---")
+
+    # --- My Recent Document Activity ---
+    st.subheader("My Recent Document Activity")
+    # This would require fetching recent document updates related to the user's projects
+    # For simplicity, let's just show a placeholder or a general message for now
+    st.info("Recent document activity will be displayed here.")
+
+    st.markdown("---")
+
+    # --- My Performance / Metrics (Placeholder) ---
+    st.subheader("My Performance")
+    st.info("Performance metrics and charts will be displayed here.")
+
 def projects_page():
     st.sidebar.header("Project Management")
     
@@ -610,7 +826,7 @@ def projects_page():
                 st.success("Project created successfully!")
                 st.rerun()
 
-    projects = get_projects()
+    projects = get_user_accessible_projects(st.session_state['user_info'][0])
     if not projects:
         st.header("Projects")
         st.info("No projects found. Create one from the sidebar to get started.")
@@ -636,7 +852,7 @@ def project_detail_page(project_id):
     project_details = get_project_details(project_id)
     st.header(f"Project: {project_details[1]}")
     st.write(project_details[2])
-    tabs = st.tabs(["Team", "Documents", "Code", "Reviews", "Hazards", "Traceability", "Artifacts", "Metrics", "AI Audit"])
+    tabs = st.tabs(["Team", "Documents", "Code", "Reviews", "Hazards", "Traceability", "Approved", "Audit", "Training"])
     with tabs[0]:
         team_tab(project_id)
     with tabs[1]:
@@ -650,11 +866,11 @@ def project_detail_page(project_id):
     with tabs[5]:
         traceability_tab(project_id)
     with tabs[6]:
-        artifacts_tab(project_id)
+        artifacts_tab(project_id) # This is now the 'Approved' tab
     with tabs[7]:
-        metrics_tab(project_id)
+        audit_tab(project_id)
     with tabs[8]:
-        ai_audit_tab(project_id)
+        training_tab(project_id)
 
 
 def documents_tab(project_id):
@@ -971,11 +1187,28 @@ def templates_page():
 def knowledge_base_page():
     st.header("Knowledge Base Management")
 
-    # --- KNOWLEDGE BASE CREATION ---
-    st.subheader("Knowledge Base Creation")
-    st.write("Upload documents and trigger the creation of the knowledge base. This will process the uploaded files and scrape predefined websites.")
+    # Initialize vector_store in session state if not present
+    if 'vector_store' not in st.session_state:
+        st.session_state.vector_store = None
+
+    # Attempt to load existing knowledge base on page load
+    if st.session_state.vector_store is None:
+        try:
+            # Try to load an existing collection without adding new data initially
+            # This requires a slight modification or a new function in knowledge_base.py
+            # For now, we'll assume create_and_store_embeddings can handle loading empty chunks
+            # if the collection already exists.
+            st.session_state.vector_store = knowledge_base.create_and_store_embeddings(chunks=[])
+            st.success("Existing knowledge base loaded.")
+        except Exception as e:
+            st.info(f"No existing knowledge base found or error loading: {e}. Please create one.")
+            st.session_state.vector_store = None
+
+    # --- KNOWLEDGE BASE CREATION / UPDATE ---
+    st.subheader("Knowledge Base Content")
+    st.write("Upload documents and/or scrape websites to build or update your knowledge base.")
     
-    uploaded_files = st.file_uploader("Upload PDFs and Markdown files", accept_multiple_files=True, type=['pdf', 'md'])
+    uploaded_files = st.file_uploader("Upload PDFs and Markdown files", accept_multiple_files=True, type=['pdf', 'md'], key="kb_uploader")
     
     if uploaded_files:
         # Save uploaded files to the upload directory
@@ -985,45 +1218,62 @@ def knowledge_base_page():
                 f.write(uploaded_file.getbuffer())
         st.success(f"{len(uploaded_files)} file(s) ready for processing.")
 
-    if st.button("Create Knowledge Base"):
-        with st.spinner("Creating knowledge base... This may take a while."):
-            # 1. Scrape websites
-            scraped_text = knowledge_base.scrape_websites(config.WEBSITES_TO_SCRAPE)
-            
-            # 2. Process uploaded files
-            uploaded_text = knowledge_base.process_uploaded_files(config.UPLOAD_DIRECTORY)
-            
-            # 3. Combine text
-            full_text = scraped_text + uploaded_text
-            
-            # 4. Chunk text
-            chunks = knowledge_base.chunk_text(full_text)
-            
-            # 5. Create and store embeddings
-            st.session_state.vector_store = knowledge_base.create_and_store_embeddings(chunks)
-            
-            st.success("Knowledge base created successfully!")
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        if st.button("Create/Update Knowledge Base", key="create_update_kb_btn"):
+            with st.spinner("Processing content and updating knowledge base... This may take a while."):
+                # 1. Scrape websites
+                scraped_text = knowledge_base.scrape_websites(config.WEBSITES_TO_SCRAPE)
+                
+                # 2. Process uploaded files
+                uploaded_text = knowledge_base.process_uploaded_files(config.UPLOAD_DIRECTORY)
+                
+                # 3. Combine text
+                full_text = scraped_text + uploaded_text
+                
+                # 4. Chunk text
+                chunks = knowledge_base.chunk_text(full_text)
+                
+                # 5. Create/Update and store embeddings
+                if st.session_state.vector_store is None:
+                    st.session_state.vector_store = knowledge_base.create_and_store_embeddings(chunks)
+                    st.success("Knowledge base created successfully!")
+                else:
+                    st.session_state.vector_store = knowledge_base.update_embeddings(chunks)
+                    st.success("Knowledge base updated successfully!")
+
+    with col2:
+        if st.button("Reset Knowledge Base", key="reset_kb_btn"):
+            if st.session_state.vector_store is not None:
+                with st.spinner("Resetting knowledge base..."):
+                    knowledge_base.reset_knowledge_base()
+                    st.session_state.vector_store = None
+                    st.success("Knowledge base reset successfully!")
+                    st.rerun()
+            else:
+                st.info("No knowledge base to reset.")
 
     st.markdown("---")
 
     # --- CHAT INTERFACE ---
     st.subheader("Chat with your Knowledge Base")
 
-    if 'chat_history' not in st.session_state:
-        st.session_state.chat_history = []
+    if st.session_state.vector_store is None:
+        st.warning("Please create or update the knowledge base to enable chat functionality.")
+    else:
+        if 'chat_history' not in st.session_state:
+            st.session_state.chat_history = []
 
-    for message in st.session_state.chat_history:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+        for message in st.session_state.chat_history:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
 
-    if prompt := st.chat_input("Ask a question to the knowledge base"):
-        st.session_state.chat_history.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
+        if prompt := st.chat_input("Ask a question to the knowledge base"):
+            st.session_state.chat_history.append({"role": "user", "content": prompt})
+            with st.chat_message("user"):
+                st.markdown(prompt)
 
-        if 'vector_store' not in st.session_state:
-            st.warning("Please create the knowledge base first.")
-        else:
             with st.chat_message("assistant"):
                 with st.spinner("Thinking..."):
                     # 1. Query the knowledge base
@@ -1038,10 +1288,6 @@ def knowledge_base_page():
 
 def team_tab(project_id):
     st.subheader("Team Members")
-    team_members = get_team_members(project_id)
-    if team_members:
-        df = pd.DataFrame(team_members, columns=['ID', 'Username', 'Email'])
-        st.dataframe(df[['Username', 'Email']])
     
     with st.expander("Add New Team Member"):
         with st.form("new_team_member_form", clear_on_submit=True):
@@ -1054,6 +1300,28 @@ def team_tab(project_id):
                 add_team_member(user_id, project_id)
                 st.success("Team member added!")
                 st.rerun()
+
+    team_members = get_team_members(project_id)
+    if team_members:
+        st.write("#### Current Team Members")
+        df = pd.DataFrame(team_members, columns=['ID', 'Username', 'Email'])
+        
+        # Add a 'Delete' column with buttons
+        for i, row in df.iterrows():
+            col1, col2, col3, col4 = st.columns([0.5, 2, 2, 1])
+            with col1:
+                st.write(row['ID'])
+            with col2:
+                st.write(row['Username'])
+            with col3:
+                st.write(row['Email'])
+            with col4:
+                if st.button("Delete", key=f"delete_team_member_{row['ID']}_{project_id}"):
+                    delete_team_member(row['ID'], project_id)
+                    st.success(f"Team member {row['Username']} deleted.")
+                    st.rerun()
+    else:
+        st.info("No team members in this project yet.")
 
 
 
@@ -1155,7 +1423,7 @@ def hazard_traceability_tab(project_id):
                     st.rerun()
 
 def artifacts_tab(project_id):
-    st.subheader("Artifacts")
+    st.subheader("Approved Documents")
     
     docs = get_documents(project_id)
     approved_docs = [d for d in docs if d[6] == "Approved"]
@@ -1206,10 +1474,188 @@ def metrics_tab(project_id):
         st.write("**Risk Priority Number (RPN) Distribution**")
         st.bar_chart(risk_df['rpn'])
 
-def ai_audit_tab(project_id):
-    st.subheader("AI Audit")
-    st.button("AI Audit", disabled=True)
-    st.info("AI Audit functionality coming soon.")
+def audit_tab(project_id):
+    st.subheader("Audit")
+
+    project_details = get_project_details(project_id)
+    project_name = project_details[1] if project_details else "Unknown Project"
+
+    if st.button("AI Assist"):
+        st.info("Starting AI Audit...")
+
+        # Create a unique audit reference number
+        audit_timestamp = datetime.now()
+        audit_reference = f"{project_name}-Audit-{audit_timestamp.strftime('%Y%m%d%H%M%S')}"
+
+        # Get approved documents
+        with st.spinner("Fetching approved documents..."):
+            docs = get_documents(project_id)
+            approved_docs = [d for d in docs if d[6] == "Approved"]
+            st.success(f"Found {len(approved_docs)} approved documents.")
+
+        if not approved_docs:
+            st.warning("No approved documents to audit.")
+            return
+
+        for doc in approved_docs:
+            doc_id, _, doc_name, doc_type, content_json, _, _, _, _ = doc
+            content_data = json.loads(content_json)
+            document_content = content_data.get("content", "")
+
+            with st.spinner(f"Auditing document: {doc_name}"):
+                # Prepare audit prep prompt
+                audit_prep_prompt = config.GENERAL_AI_PROMPTS["Audit Prep"].replace("[Document Type]", doc_type)
+
+                # Query knowledge base
+                st.info(f"Querying knowledge base for {doc_type} checklist...")
+                if 'vector_store' not in st.session_state:
+                    st.error("Knowledge base not created. Please create it in the Knowledge Base tab.")
+                    return
+                
+                knowledge_base_context_docs = knowledge_base.query_knowledge_base(audit_prep_prompt, st.session_state.vector_store)
+                knowledge_base_context = "\n".join([d.page_content for d in knowledge_base_context_docs])
+                show_logs(audit_prep_prompt, knowledge_base_context)
+                st.success("Knowledge base query complete.")
+
+                # Prepare final prompt
+                user_query = config.GENERAL_AI_PROMPTS["Audit Query"]
+                final_prompt = f"""
+                **User Data:**
+                {document_content}
+
+                **Context:**
+                {knowledge_base_context}
+
+                **User Query:**
+                {user_query}
+                """
+
+                # Call LLM to get audit gaps
+                st.info("Analyzing document for audit gaps...")
+                gaps_response = ai_integration.llm_client_instance.generate_text(final_prompt)
+                show_logs(final_prompt, gaps_response)
+                st.success("Document analysis complete.")
+
+                # Parse and store gaps
+                gaps = [gap.strip() for gap in gaps_response.split('\n') if gap.strip()]
+                for gap in gaps:
+                    add_audit_gap(project_id, audit_reference, doc_name, gap, "New", audit_timestamp, document_content, user_query, knowledge_base_context)
+
+        st.success("AI Audit complete!")
+
+    # Display audit gaps
+    st.subheader("Audit Gaps")
+    
+    audit_references = get_audit_references(project_id)
+    audit_references = [ref for ref in audit_references if ref is not None]
+    if audit_references:
+        # Sort audit references by timestamp descending
+        audit_references.sort(key=lambda x: datetime.strptime(x.split('-')[-1], '%Y%m%d%H%M%S'), reverse=True)
+        selected_audit_reference = st.selectbox("Select Audit Reference", audit_references)
+
+        if selected_audit_reference:
+            audit_gaps_data = get_audit_gaps_by_reference(project_id, selected_audit_reference)
+            if audit_gaps_data:
+                audit_timestamp = audit_gaps_data[0][6] # Get timestamp from the first record
+                st.write(f"**Audit Run Date/Time:** {audit_timestamp}")
+
+                df = pd.DataFrame(audit_gaps_data, columns=['ID', 'Project ID', 'Audit Reference', 'Document Name', 'Comments', 'Status', 'Audit Timestamp', 'User Data', 'User Query', 'Context'])
+                
+                # Download button
+                markdown_report = ""
+                for index, row in df.iterrows():
+                    markdown_report += f"## Audit Gap #{row['ID']}\n\n"
+                    markdown_report += f"## Audit Gap #{row['ID']}\n\n"
+                    markdown_report += f"**Document Name:** {row['Document Name']}\n\n"
+                    markdown_report += f"**Audit Gap:** {row['Comments']}\n\n"
+                    markdown_report += f"**Status:** {row['Status']}\n\n"
+                    markdown_report += f"""### User Data\n\n---\n{row["User Data"]}\n\n---"""
+                    markdown_report += f"""### User Query\n\n---\n{row["User Query"]}\n\n---"""
+                    markdown_report += f"""### Context\n\n---\n{row["Context"]}\n\n---"""
+
+                st.download_button(
+                    label="Download Report",
+                    data=markdown_report,
+                    file_name=f"{selected_audit_reference}.md",
+                    mime='text/markdown',
+                )
+
+                edited_df = st.data_editor(
+                    df[['Document Name', 'Comments', 'Status']], 
+                    column_config={
+                        "Status": st.column_config.SelectboxColumn(
+                            "Status",
+                            options=["New", "In Progress", "Done"],
+                            required=True,
+                        )
+                    },
+                    use_container_width=True
+                )
+                # Here you would add logic to update the database with the edited data
+    else:
+        st.info("No audit gaps found.")
+
+def training_tab(project_id):
+    st.subheader("Training")
+
+    if st.button("AI Assist", key=f"training_ai_assist_{project_id}"):
+        st.session_state.ai_training_assist = True
+
+    if st.session_state.get('ai_training_assist'):
+        with st.expander("AI Training Assist", expanded=True):
+            prompt = st.text_area("Prompt", value=config.GENERAL_AI_PROMPTS['Training'], key=f"training_prompt_{project_id}")
+            if st.button("Generate Questions", key=f"generate_training_questions_{project_id}"):
+                with st.spinner("Generating training questions..."):
+                    if 'vector_store' not in st.session_state:
+                        st.error("Knowledge base not created. Please create it in the Knowledge Base tab.")
+                        return
+                    
+                    knowledge_base_context_docs = knowledge_base.query_knowledge_base(prompt, st.session_state.vector_store)
+                    knowledge_base_context = "\n".join([d.page_content for d in knowledge_base_context_docs])
+                    
+                    response = ai_integration.llm_client_instance.generate_text(f"Context:\n{knowledge_base_context}\n\nTask: {prompt}")
+                    questions = response.strip().split('\n')
+                    for q in questions:
+                        if '(True)' in q:
+                            question = q.replace('(True)', '').strip()
+                            answer = 'True'
+                        elif '(False)' in q:
+                            question = q.replace('(False)', '').strip()
+                            answer = 'False'
+                        else:
+                            continue
+                        add_training_question(project_id, question, answer, st.session_state['user_info'][0])
+                    st.session_state.ai_training_assist = False
+                    st.rerun()
+
+    questions_to_answer = get_training_questions(project_id, st.session_state['user_info'][0])
+    if questions_to_answer:
+        with st.form(key=f"training_form_{project_id}"):
+            answers = {}
+            for q in questions_to_answer:
+                answers[q[0]] = st.radio(q[2], ["True", "False"], key=f"q_{q[0]}")
+            
+            submitted = st.form_submit_button("Submit Answers")
+            if submitted:
+                for q_id, answer in answers.items():
+                    update_training_answer(q_id, answer)
+                st.rerun()
+
+    st.subheader("Training History")
+    training_history = get_training_history(project_id, st.session_state['user_info'][0])
+    if training_history:
+        df = pd.DataFrame(training_history, columns=['ID', 'Project ID', 'Question', 'User Answer', 'Actual Answer', 'User ID', 'Timestamp'])
+        df['Correct'] = df['User Answer'] == df['Actual Answer']
+        st.dataframe(df[['Timestamp', 'Question', 'User Answer', 'Actual Answer', 'Correct']])
+        
+        total_correct = df['Correct'].sum()
+        total_questions = len(df)
+        st.metric("Overall Score", f"{total_correct}/{total_questions} ({total_correct/total_questions:.2%})")
+    else:
+        st.info("No training history yet.")
+
+
+
 
 
 def get_reviews_for_user(user_id):
@@ -1254,6 +1700,40 @@ def get_all_reviews_for_project(project_id):
     data = c.fetchall()
     conn.close()
     return data
+
+def get_user_accessible_projects(user_id):
+    conn = sqlite3.connect('docsmate.db', timeout=15)
+    c = conn.cursor()
+    
+    # Projects created by the user
+    c.execute('SELECT * FROM projects WHERE created_by_user_id = ?', (user_id,))
+    created_projects = c.fetchall()
+
+    # Projects where the user is a team member
+    c.execute('''
+        SELECT p.* FROM projects p
+        JOIN team_members tm ON p.id = tm.project_id
+        WHERE tm.user_id = ?
+    ''', (user_id,))
+    team_projects = c.fetchall()
+
+    # Projects where the user has a pending review
+    c.execute('''
+        SELECT DISTINCT p.* FROM projects p
+        JOIN documents d ON p.id = d.project_id
+        JOIN reviews r ON d.id = r.document_id
+        WHERE r.reviewer_id = ? AND r.status = 'Pending'
+    ''', (user_id,))
+    review_projects = c.fetchall()
+
+    # Combine and deduplicate projects
+    all_projects = {}
+    for p in created_projects + team_projects + review_projects:
+        all_projects[p[0]] = p # Use project ID as key to handle duplicates
+    
+    conn.close()
+    return list(all_projects.values())
+
 
 def reviews_tab(project_id):
     st.subheader("Reviews")
@@ -1358,7 +1838,8 @@ def help_page():
     * **Traceability**: Manage traceability between requirements, design, and tests.
     * **Artifacts**: Download all approved documents as a single zip file.
     * **Metrics**: View project metrics and charts.
-    * **AI Audit**: (Coming Soon) Audit trail for AI-assisted actions.
+    * **AI Audit**: Audit trail for AI-assisted actions.
+    * **Training**: Generate True/False questions from the knowledge base to test your understanding of SOPs. Track your scores and review your answers.
 
     ### Review Items (Documents and Code)
 
@@ -1376,7 +1857,7 @@ def help_page():
 
     ### Configuration
 
-    * **Knowledge Base**: Upload your own documents to create a local knowledge base for the RAG system.
+    * **Knowledge Base**: Upload your own documents and/or scrape websites to create or update a local knowledge base for the RAG system. You can also reset the knowledge base.
 
     ### Admin
 

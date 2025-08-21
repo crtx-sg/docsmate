@@ -196,5 +196,8 @@ GENERAL_AI_PROMPTS = {
     "Summarize": "Summarize the key points of the provided text.",
     "Explain": "Explain the concept of [configurable_item] in simple terms based on the text.",
     "Improve Writing": "Improve the clarity and conciseness of the following text.",
-    "Check for Inconsistencies": "Review the following text for any inconsistencies or contradictions."
+    "Check for Inconsistencies": "Review the following text for any inconsistencies or contradictions.",
+    "Audit Prep": "Prepare a checklist for [Document Type]",
+    "Audit Query": "Analyze the 'User Data' against the requirements in the 'Context'. Identify and list only the specific requirements that are not met by the 'User Data'. These are the audit gaps. Do not include any positive statements or confirmations of met requirements.",
+    "Training": "Prepare a set of at most 5 True/False type questions, related to SOPs from the knowledge base. Each question must end with either '(True)' or '(False)'."
 }
