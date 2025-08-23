@@ -4,7 +4,7 @@ import os
 import requests
 from bs4 import BeautifulSoup
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import Milvus
+from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import OllamaEmbeddings
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 import config
@@ -43,7 +43,7 @@ def process_uploaded_files(upload_dir):
                     all_text += page.page_content + "\n\n"
             except Exception as e:
                 print(f"Error processing {filename}: {e}")
-        elif filename.endswith(".md"):
+        elif filename.endswith((".md", ".txt")):
             try:
                 loader = TextLoader(file_path)
                 all_text += loader.load()[0].page_content + "\n\n"
@@ -64,68 +64,51 @@ def chunk_text(text):
 def get_embeddings_model():
     """Initializes the embeddings model from the config."""
     if config.RAG_LLM_PROVIDER == 'ollama':
-        return OllamaEmbeddings(model=config.OLLAMA_EMBEDDING_MODEL)
+        return OllamaEmbeddings(model=config.OLLAMA_EMBEDDING_MODEL, base_url=config.OLLAMA_API_BASE_URL)
     # Add other providers here as needed
     else:
         raise ValueError(f"Unsupported RAG LLM provider: {config.RAG_LLM_PROVIDER}")
 
-from pymilvus import connections, Collection, utility
+
 
 def create_and_store_embeddings(chunks):
-    """Creates and stores embeddings in Milvus, or loads if exists."""
+    """Creates and stores embeddings in Faiss, or loads if exists."""
     embeddings = get_embeddings_model()
-    connections.connect(host=config.MILVUS_HOST, port=config.MILVUS_PORT)
-    
-    collection_name = "docsmate_knowledge_base"
-    if utility.has_collection(collection_name):
-        # If collection exists, load it
-        vector_store = Milvus(
-            embedding_function=embeddings,
-            connection_args={"host": config.MILVUS_HOST, "port": config.MILVUS_PORT},
-            collection_name=collection_name,
-            auto_id=True
-        )
-        print(f"Loaded existing Milvus collection: {collection_name}")
+    faiss_index_path = config.FAISS_INDEX_PATH
+    faiss_index_file = os.path.join(faiss_index_path, "index.faiss")
+    faiss_pkl_file = os.path.join(faiss_index_path, "index.pkl")
+
+    if os.path.exists(faiss_index_file) and os.path.exists(faiss_pkl_file):
+        try:
+            vector_store = FAISS.load_local(faiss_index_path, embeddings, allow_dangerous_deserialization=True)
+            print(f"Loaded existing Faiss index from: {faiss_index_path}")
+            if chunks:
+                vector_store.add_texts(texts=chunks)
+                vector_store.save_local(faiss_index_path)
+                print(f"Added {len(chunks)} new chunks to Faiss index: {faiss_index_path}")
+        except Exception as e:
+            print(f"Error loading or updating Faiss index from {faiss_index_path}: {e}. Recreating index.")
+            vector_store = FAISS.from_texts(texts=chunks, embedding=embeddings)
+            vector_store.save_local(faiss_index_path)
+            print(f"Recreated and stored embeddings in new Faiss index: {faiss_index_path}")
     else:
-        # If collection does not exist, create and insert
-        vector_store = Milvus.from_texts(
-            texts=chunks,
-            embedding=embeddings,
-            connection_args={"host": config.MILVUS_HOST, "port": config.MILVUS_PORT},
-            collection_name=collection_name,
-            auto_id=True
-        )
-        print(f"Created and stored embeddings in new Milvus collection: {collection_name}")
+        print(f"Faiss index files not found in {faiss_index_path}. Creating new index.")
+        vector_store = FAISS.from_texts(texts=chunks, embedding=embeddings)
+        vector_store.save_local(faiss_index_path)
+        print(f"Created and stored embeddings in new Faiss index: {faiss_index_path}")
     return vector_store
 
-def update_embeddings(new_chunks):
-    """Adds new chunks to an existing Milvus collection."""
-    embeddings = get_embeddings_model()
-    connections.connect(host=config.MILVUS_HOST, port=config.MILVUS_PORT)
-    
-    collection_name = "docsmate_knowledge_base"
-    if not utility.has_collection(collection_name):
-        raise ValueError("Knowledge base does not exist. Please create it first.")
-        
-    vector_store = Milvus(
-        embedding_function=embeddings,
-        connection_args={"host": config.MILVUS_HOST, "port": config.MILVUS_PORT},
-        collection_name=collection_name,
-        auto_id=True
-    )
-    vector_store.add_texts(new_chunks)
-    print(f"Added {len(new_chunks)} new chunks to Milvus collection: {collection_name}")
-    return vector_store
+
+
+import shutil
 
 def reset_knowledge_base():
-    """Deletes the Milvus knowledge base collection."""
-    connections.connect(host=config.MILVUS_HOST, port=config.MILVUS_PORT)
-    collection_name = "docsmate_knowledge_base"
-    if utility.has_collection(collection_name):
-        utility.drop_collection(collection_name)
-        print(f"Milvus collection '{collection_name}' reset successfully.")
+    """Deletes the Faiss knowledge base."""
+    if os.path.exists(config.FAISS_INDEX_PATH):
+        shutil.rmtree(config.FAISS_INDEX_PATH)
+        print(f"Faiss index '{config.FAISS_INDEX_PATH}' reset successfully.")
     else:
-        print(f"Milvus collection '{collection_name}' does not exist. Nothing to reset.")
+        print(f"Faiss index '{config.FAISS_INDEX_PATH}' does not exist. Nothing to reset.")
 
 
 def query_knowledge_base(query, vector_store):
@@ -148,6 +131,10 @@ def get_answer_from_llm(query, context_docs):
     **Answer:**
     """
     
-    response = ai_integration.llm_client_instance.generate_text(prompt)
+    try:
+        response = ai_integration.llm_client_instance.generate_text(prompt)
+    except Exception as e:
+        print(f"Error generating text from LLM: {e}")
+        raise
     
     return response

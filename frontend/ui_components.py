@@ -5,13 +5,11 @@ import os
 from datetime import datetime
 import zipfile
 import re
-
-import config
-import ai_integration
-import knowledge_base
-import database
-import utils
+import requests
 from streamlit_quill import st_quill
+import difflib
+
+API_URL = "http://backend:8000"
 
 def dashboard_page():
     st.header(f"Welcome, {st.session_state['user_info'][1]}!")
@@ -22,23 +20,23 @@ def dashboard_page():
     st.subheader("Quick Stats")
     col1, col2, col3, col4 = st.columns(4)
 
-    accessible_projects = database.get_user_accessible_projects(user_id)
+    accessible_projects = requests.get(f"{API_URL}/projects/user/{user_id}").json()
     with col1:
         st.metric("Total Projects Accessible", len(accessible_projects))
 
-    pending_reviews = database.get_reviews_for_user(user_id)
-    pending_review_count = sum(1 for r in pending_reviews if r[3] == 'Pending')
+    pending_reviews = requests.get(f"{API_URL}/reviews/user/{user_id}").json()
+    pending_review_count = sum(1 for r in pending_reviews if r['status'] == 'Pending')
     with col2:
         st.metric("Documents Awaiting My Review", pending_review_count)
 
-    pending_training_questions = database.get_training_questions(user_id, user_id) # Assuming user_id is also project_id for simplicity or adjust as needed
+    pending_training_questions = requests.get(f"{API_URL}/training/questions/{user_id}/{user_id}").json()
     with col3:
         st.metric("Pending Training Questions", len(pending_training_questions))
     
-    training_history = database.get_training_history(user_id, user_id)
+    training_history = requests.get(f"{API_URL}/training/history/{user_id}/{user_id}").json()
     if training_history:
-        df_training = pd.DataFrame(training_history, columns=['ID', 'Project ID', 'Question', 'User Answer', 'Actual Answer', 'User ID', 'Timestamp'])
-        total_correct = df_training['User Answer'].eq(df_training['Actual Answer']).sum()
+        df_training = pd.DataFrame(training_history)
+        total_correct = df_training['user_answer'].eq(df_training['actual_answer']).sum()
         total_questions = len(df_training)
         overall_score = f"{total_correct}/{total_questions}" if total_questions > 0 else "N/A"
         overall_percentage = f"({total_correct/total_questions:.0%})" if total_questions > 0 else ""
@@ -57,12 +55,10 @@ def dashboard_page():
     if pending_review_count > 0:
         st.write("#### Documents Awaiting Your Review:")
         for review in pending_reviews:
-            if review[3] == 'Pending':
-                doc_details = database.get_document_details(review[0])
+            if review['status'] == 'Pending':
+                doc_details = requests.get(f"{API_URL}/documents/{review['document_id']}").json()
                 if doc_details:
-                    st.info(f"**Project:** {review[2]} - **Document:** {doc_details[2]} (Status: {review[3]})")
-                    # Provide a way to navigate to the review, perhaps by setting session state
-                    # This would require a more complex navigation handling or direct link if possible
+                    st.info(f"**Project:** {review['project_name']} - **Document:** {doc_details['doc_name']} (Status: {review['status']})")
     else:
         st.info("No documents currently awaiting your review.")
 
@@ -77,18 +73,7 @@ def dashboard_page():
     # --- My Projects Overview ---
     st.subheader("My Projects Overview")
     if accessible_projects:
-        project_data = []
-        for p in accessible_projects:
-            project_id, name, description, created_by_user_id = p
-            creator_name = database.get_user_by_id(created_by_user_id)
-            project_data.append({
-                "ID": project_id,
-                "Name": name,
-                "Description": description,
-                "Created By": creator_name
-            })
-        df_projects = pd.DataFrame(project_data)
-        st.dataframe(df_projects, use_container_width=True)
+        st.dataframe(accessible_projects, use_container_width=True)
     else:
         st.info("You are not associated with any projects yet. Create a new project from the sidebar.")
 
@@ -96,8 +81,6 @@ def dashboard_page():
 
     # --- My Recent Document Activity ---
     st.subheader("My Recent Document Activity")
-    # This would require fetching recent document updates related to the user's projects
-    # For simplicity, let's just show a placeholder or a general message for now
     st.info("Recent document activity will be displayed here.")
 
     st.markdown("---")
@@ -115,36 +98,36 @@ def projects_page():
             project_desc = st.text_area("Description")
             submitted = st.form_submit_button("Create Project")
             if submitted:
-                database.create_project(project_name, project_desc, st.session_state['user_info'][0])
+                requests.post(f"{API_URL}/projects", json={"name": project_name, "description": project_desc, "user_id": st.session_state['user_info'][0]})
                 st.success("Project created successfully!")
                 st.rerun()
 
-    projects = database.get_user_accessible_projects(st.session_state['user_info'][0])
+    projects = requests.get(f"{API_URL}/projects/user/{st.session_state['user_info'][0]}").json()
     if not projects:
         st.header("Projects")
         st.info("No projects found. Create one from the sidebar to get started.")
     else:
-        project_names = [p[1] for p in projects]
+        project_names = [p['name'] for p in projects]
         selected_project_name = st.sidebar.selectbox("Select a project", project_names, key="project_selector")
-        selected_project = next((p for p in projects if p[1] == selected_project_name), None)
+        selected_project = next((p for p in projects if p['name'] == selected_project_name), None)
         if selected_project:
             with st.sidebar.expander("Edit Current Project"):
                 with st.form("edit_project_form_sidebar"):
-                    st.write(f"Editing: **{selected_project[1]}**")
-                    new_project_name = st.text_input("New Project Name", value=selected_project[1])
-                    new_project_desc = st.text_area("New Description", value=selected_project[2])
+                    st.write(f"Editing: **{selected_project['name']}**")
+                    new_project_name = st.text_input("New Project Name", value=selected_project['name'])
+                    new_project_desc = st.text_area("New Description", value=selected_project['description'])
                     update_submitted = st.form_submit_button("Update Project")
                     if update_submitted:
-                        database.update_project(selected_project[0], new_project_name, new_project_desc)
+                        requests.put(f"{API_URL}/projects/{selected_project['id']}", json={"name": new_project_name, "description": new_project_desc})
                         st.success("Project updated successfully!")
                         st.rerun()
             
-            project_detail_page(selected_project[0])
+            project_detail_page(selected_project['id'])
 
 def project_detail_page(project_id):
-    project_details = database.get_project_details(project_id)
-    st.header(f"Project: {project_details[1]}")
-    st.write(project_details[2])
+    project_details = requests.get(f"{API_URL}/projects/{project_id}").json()
+    st.header(f"Project: {project_details['name']}")
+    st.write(project_details['description'])
     tabs = st.tabs(["Documents", "Code", "Reviews", "Approved", "Team", "Hazards", "Traceability", "Audit", "Training"])
     with tabs[0]:
         documents_tab(project_id)
@@ -167,8 +150,8 @@ def project_detail_page(project_id):
 
 def documents_tab(project_id):
     st.subheader("Documents")
-    project_details = database.get_project_details(project_id)
-    project_description = project_details[2] if project_details else ""
+    project_details = requests.get(f"{API_URL}/projects/{project_id}").json()
+    project_description = project_details['description'] if project_details else ""
 
     # --- Create New Document Section ---
     with st.expander("Create New Document", expanded=False):
@@ -181,20 +164,20 @@ def documents_tab(project_id):
         source_choice = st.radio("Create document from:", source_options, key=f"doc_create_source_{project_id}")
         
         if source_choice == "From Scratch":
-            doc_type = st.selectbox("Select Document Type", config.DOCUMENT_TYPES, key=f"scratch_type_{project_id}")
+            doc_type = st.selectbox("Select Document Type", requests.get(f"{API_URL}/document_types").json(), key=f"scratch_type_{project_id}")
         elif source_choice == "From a Template":
-            templates = database.get_templates()
+            templates = requests.get(f"{API_URL}/templates").json()
             if templates:
-                template_map = {t[1]: (t[2], t[3]) for t in templates}
+                template_map = {t['name']: (t['content'], t['document_type']) for t in templates}
                 selected_template_name = st.selectbox("Select a template", options=list(template_map.keys()), key=f"template_select_{project_id}")
                 content_source, doc_type = template_map[selected_template_name]
                 doc_name_suggestion = selected_template_name
             else:
                 st.warning("No templates found.")
         elif source_choice == "From an Existing Document":
-            existing_docs = database.get_documents(project_id)
+            existing_docs = requests.get(f"{API_URL}/documents/project/{project_id}").json()
             if existing_docs:
-                doc_map = {f"{d[2]}(v{d[5]})": (json.loads(d[4]).get("content", ""), d[3], d[5], d[2]) for d in existing_docs}
+                doc_map = {f"{d['doc_name']}(v{d['version']})": (json.loads(d['content']).get("content", ""), d['doc_type'], d['version'], d['doc_name']) for d in existing_docs}
                 selected_doc_name_key = st.selectbox("Select a source document", options=list(doc_map.keys()), key=f"existing_doc_select_{project_id}")
                 content_source, doc_type, version, doc_name_suggestion = doc_map[selected_doc_name_key]
                 version += 1
@@ -209,7 +192,8 @@ def documents_tab(project_id):
 
         if st.button("Create Document", key=f"create_doc_btn_{project_id}"):
             if item_name and doc_type:
-                doc_id = database.create_document(project_id, item_name, doc_type, content_source, version)
+                response = requests.post(f"{API_URL}/documents", json={"project_id": project_id, "doc_name": item_name, "doc_type": doc_type, "content": content_source, "version": version})
+                doc_id = response.json()['id']
                 st.session_state.last_created_doc_id = doc_id
                 if 'ai_generated_content' in st.session_state:
                     del st.session_state.ai_generated_content
@@ -221,18 +205,17 @@ def documents_tab(project_id):
     st.markdown("---")
     
     # --- Existing Documents Selection ---
-    docs = database.get_documents(project_id)
+    docs = requests.get(f"{API_URL}/documents/project/{project_id}").json()
     if not docs:
         st.info("No documents in this project yet. Create one above to get started.")
         return # Exit function if no documents to display/edit
 
-    doc_display_names = [f"{d[2]}(v{d[5]})" for d in docs]
-    doc_ids = [d[0] for d in docs]
+    doc_display_names = [f"{d['doc_name']}(v{d['version']})" for d in docs]
+    doc_ids = [d['id'] for d in docs]
 
     default_index = 0
     if 'last_created_doc_id' in st.session_state and st.session_state.last_created_doc_id in doc_ids:
         default_index = doc_ids.index(st.session_state.last_created_doc_id)
-        # Clear the session state variable after using it
         del st.session_state.last_created_doc_id
 
     selected_doc_name_display = st.selectbox("Select a document to view or edit", doc_display_names, index=default_index, key=f"doc_select_{project_id}")
@@ -240,10 +223,10 @@ def documents_tab(project_id):
     if selected_doc_name_display:
         selected_doc_index = doc_display_names.index(selected_doc_name_display)
         selected_doc_info = docs[selected_doc_index]
-        doc_details = database.get_document_details(selected_doc_info[0])
+        doc_details = requests.get(f"{API_URL}/documents/{selected_doc_info['id']}").json()
 
         if doc_details:
-            doc_id, _, doc_name, doc_type, content_json, version, status, _, updated_at = doc_details
+            doc_id, _, doc_name, doc_type, content_json, version, status, _, updated_at = doc_details.values()
             content_data = json.loads(content_json)
             
             st.markdown(f"### {doc_name} (v{version}) - Status: {status}")
@@ -254,7 +237,7 @@ def documents_tab(project_id):
                 if st.button("✨ AI Assist", key=f"ai_assist_{doc_id}"):
                     st.session_state.ai_assist_doc_id = doc_id if st.session_state.get('ai_assist_doc_id') != doc_id else None
             with col_pdf:
-                pdf_data = utils.generate_pdf(content_data.get("content", ""))
+                pdf_data = requests.post(f"{API_URL}/generate_pdf", json={"html_content": content_data.get("content", "")}).content
                 if pdf_data:
                     st.download_button(
                         label="Export PDF",
@@ -270,7 +253,7 @@ def documents_tab(project_id):
             if st.session_state.get('ai_assist_doc_id') == doc_id:
                 with st.container(border=True):
                     st.subheader("AI Assistant")
-                    default_prompt = config.NEW_DOCUMENT_PROMPTS.get(doc_type, f"Improve the clarity of this {doc_type} document.").replace("[configurable_item]", project_description)
+                    default_prompt = requests.get(f"{API_URL}/prompts/new_document/{doc_type}").json()['prompt'].replace("[configurable_item]", project_description)
                     
                     btn_cols = st.columns(2)
                     with btn_cols[0]:
@@ -278,9 +261,9 @@ def documents_tab(project_id):
                             clean_context = re.sub('<[^<]+?>', '', content_data.get("content", ""))
                             full_prompt = f"Context:\n{clean_context}\n\nTask: {st.session_state[f'editor_ai_prompt_{doc_id}']}"
                             with st.spinner("Generating AI content..."):
-                                ai_response = ai_integration.generate_text(full_prompt)
+                                ai_response = requests.post(f"{API_URL}/generate_text", json={"prompt": full_prompt}).json()['text']
                                 st.session_state[f'ai_response_{doc_id}'] = ai_response
-                                utils.show_logs(full_prompt, ai_response)
+                                # utils.show_logs(full_prompt, ai_response)
                     with btn_cols[1]:
                         if st.button("Close Assistant", key=f"close_ai_{doc_id}", use_container_width=True):
                             if f'ai_response_{doc_id}' in st.session_state:
@@ -306,8 +289,8 @@ def documents_tab(project_id):
 
             if next_state == "Review Request":
                 author_comment = st.text_input("Author comment to Reviewer", key=f"author_comment_{doc_id}")
-                users = database.get_all_users()
-                user_map = {u[1]: u[0] for u in users}
+                users = requests.get(f"{API_URL}/users").json()
+                user_map = {u['username']: u['id'] for u in users}
                 reviewers = st.multiselect("Select Reviewers", list(user_map.keys()), key=f"reviewers_select_{doc_id}")
             elif next_state == "Approved":
                 author_comment = st.text_input("Approval Comments", key=f"approval_comment_{doc_id}")
@@ -319,21 +302,21 @@ def documents_tab(project_id):
                     elif not author_comment:
                         st.error("Please provide a comment for the reviewer.")
                     else:
-                        database.update_document(doc_id, content_from_editor, "Review Request", author_comment, st.session_state['user_info'][0])
+                        requests.put(f"{API_URL}/documents/{doc_id}", json={"content": content_from_editor, "status": "Review Request", "comments": author_comment, "author_id": st.session_state['user_info'][0]})
                         for reviewer_name in reviewers:
                             reviewer_id = user_map[reviewer_name]
-                            database.add_review(doc_id, reviewer_id, "", "Pending")
+                            requests.post(f"{API_URL}/reviews", json={"document_id": doc_id, "reviewer_id": reviewer_id, "status": "Pending", "comments": ""})
                         st.success("Document saved and review requested!")
                         st.rerun()
                 elif next_state == "Approved":
                     if not author_comment:
                         st.error("Please provide approval comments.")
                     else:
-                        database.update_document(doc_id, content_from_editor, "Approved", author_comment, st.session_state['user_info'][0])
+                        requests.put(f"{API_URL}/documents/{doc_id}", json={"content": content_from_editor, "status": "Approved", "comments": author_comment, "author_id": st.session_state['user_info'][0]})
                         st.success("Document approved successfully!")
                         st.rerun()
                 else: # Draft
-                    database.update_document(doc_id, content_from_editor, "Draft", author_comment, st.session_state['user_info'][0])
+                    requests.put(f"{API_URL}/documents/{doc_id}", json={"content": content_from_editor, "status": "Draft", "comments": author_comment, "author_id": st.session_state['user_info'][0]})
                     st.success("Document saved as draft!")
                     st.rerun()
 
@@ -341,14 +324,12 @@ def documents_tab(project_id):
             
             # --- Revision History ---
             with st.expander("View Revision History"):
-                history = database.get_revision_history(doc_id)
+                history = requests.get(f"{API_URL}/documents/{doc_id}/history").json()
                 if history:
-                    df = pd.DataFrame(history, columns=['ID', 'Doc ID', 'Status', 'Author ID', 'Timestamp', 'Comments'])
-                    df['Author'] = df['Author ID'].apply(database.get_user_by_id)
-                    st.dataframe(df[['Status', 'Author', 'Timestamp', 'Comments']], use_container_width=True)
+                    df = pd.DataFrame(history, columns=['id', 'doc_id', 'status', 'author_id', 'timestamp', 'comments'])
+                    st.dataframe(df[['status', 'author_id', 'timestamp', 'comments']], use_container_width=True)
                 else:
                     st.info("No revision history for this document yet.")
-
 
 def code_tab(project_id):
     st.subheader("Submit Code for Review")
@@ -369,7 +350,7 @@ def code_tab(project_id):
             if submitted:
                 if item_name:
                     content = {"raw_diff": final_diff}
-                    database.create_document(project_id, item_name, "Code Review", content, status="Review Request")
+                    requests.post(f"{API_URL}/documents", json={"project_id": project_id, "doc_name": item_name, "doc_type": "Code Review", "content": content, "status": "Review Request"})
                     st.success(f"Code Review Item '{item_name}' created successfully!")
                     st.rerun()
                 else:
@@ -377,17 +358,17 @@ def code_tab(project_id):
 
     st.markdown("---")
     st.subheader("View Existing Code Reviews")
-    docs = database.get_documents(project_id)
-    code_reviews = [d for d in docs if d[3] == "Code Review"]
+    docs = requests.get(f"{API_URL}/documents/project/{project_id}").json()
+    code_reviews = [d for d in docs if d['doc_type'] == "Code Review"]
     if not code_reviews:
         st.info("No code review items in this project yet.")
     else:
-        review_item_names = [d[2] for d in code_reviews]
+        review_item_names = [d['doc_name'] for d in code_reviews]
         selected_item_name = st.selectbox("Select a code review item to view diff", review_item_names)
         if selected_item_name:
-            selected_item = next((d for d in code_reviews if d[2] == selected_item_name), None)
+            selected_item = next((d for d in code_reviews if d['doc_name'] == selected_item_name), None)
             if selected_item:
-                content_data = json.loads(selected_item[4])
+                content_data = json.loads(selected_item['content'])
                 payload = content_data.get("content", {})
                 if isinstance(payload, str):
                     try:
@@ -397,7 +378,7 @@ def code_tab(project_id):
                 
                 raw_diff = payload.get("raw_diff")
                 if raw_diff:
-                    diff_html = utils.colorize_diff_to_html(raw_diff)
+                    diff_html = requests.post(f"{API_URL}/colorize_diff", json={"diff_text": raw_diff}).json()['html']
                     st.components.v1.html(diff_html, height=600, scrolling=True)
                 else:  # Fallback for old format
                     code1 = payload.get("code1", "")
@@ -408,15 +389,14 @@ def code_tab(project_id):
 
                 # Add Your Review section
                 st.subheader("Add Your Review")
-                with st.form(key=f"code_review_form_{selected_item[0]}", clear_on_submit=True):
+                with st.form(key=f"code_review_form_{selected_item['id']}", clear_on_submit=True):
                     comment = st.text_area("Comments")
                     status = st.selectbox("Status", ["Comment", "Approved", "Needs Revision"])
                     submit_review = st.form_submit_button("Submit Review")
                     if submit_review:
-                        database.add_review(selected_item[0], st.session_state['user_info'][0], comment, status)
+                        requests.post(f"{API_URL}/reviews", json={"document_id": selected_item['id'], "reviewer_id": st.session_state['user_info'][0], "comments": comment, "status": status})
                         st.success("Your review has been submitted.")
                         st.rerun()
-
 
 def templates_page():
     st.header("Document Templates")
@@ -431,29 +411,29 @@ def templates_page():
     if st.session_state.get('ai_template_open', False):
         with st.expander("AI Template Generator", expanded=True):
             st.write("### AI Content Generation")
-            selected_category = st.selectbox("Select a Document Type", config.DOCUMENT_TYPES, key="template_ai_cat")
-            prompt_template = config.NEW_DOCUMENT_PROMPTS.get(selected_category, "Generate a document template for [describe your item here].")
+            selected_category = st.selectbox("Select a Document Type", requests.get(f"{API_URL}/document_types").json(), key="template_ai_cat")
+            prompt_template = requests.get(f"{API_URL}/prompts/new_document/{selected_category}").json()['prompt']
             default_prompt = prompt_template.replace("[configurable_item]", "[describe your item here]")
             
             user_prompt = st.text_area("Your prompt to the AI:", value=default_prompt, height=100, key="template_ai_prompt")
 
             if st.button("Generate with AI", key="template_ai_gen"):
                 with st.spinner("Generating AI content..."):
-                    ai_generated_template = ai_integration.generate_text(user_prompt)
+                    ai_generated_template = requests.post(f"{API_URL}/generate_text", json={"prompt": user_prompt}).json()['text']
                     st.session_state.new_template_quill = ai_generated_template
                     st.session_state.ai_template_open = False
-                    utils.show_logs(user_prompt, ai_generated_template)
+                    # utils.show_logs(user_prompt, ai_generated_template)
                     st.rerun()
 
     with st.expander("Create New Template", expanded=True):
         with st.form("new_template_form", clear_on_submit=True):
             template_name = st.text_input("Template Name")
-            doc_type = st.selectbox("Document Type", config.DOCUMENT_TYPES)
+            doc_type = st.selectbox("Document Type", requests.get(f"{API_URL}/document_types").json())
             template_content = st_quill(key="new_template_quill", html=True, value=st.session_state.get('new_template_quill', ''))
             submitted = st.form_submit_button("Save New Template")
             if submitted:
                 if template_name and doc_type:
-                    database.create_template(template_name, template_content, doc_type)
+                    requests.post(f"{API_URL}/templates", json={"name": template_name, "content": template_content, "document_type": doc_type})
                     if 'new_template_quill' in st.session_state:
                          del st.session_state.new_template_quill
                     st.success(f"Template '{template_name}' created!")
@@ -463,167 +443,141 @@ def templates_page():
 
     st.markdown("---")
     st.subheader("Existing Templates")
-    templates = database.get_templates()
+    templates = requests.get(f"{API_URL}/templates").json()
     if not templates:
         st.info("No templates created yet.")
     else:
-        template_names = [t[1] for t in templates]
+        template_names = [t['name'] for t in templates]
         selected_template_name = st.selectbox("Select a template to edit", template_names)
-        selected_template = next((t for t in templates if t[1] == selected_template_name), None)
+        selected_template = next((t for t in templates if t['name'] == selected_template_name), None)
         if selected_template:
-            st.write(f"Editing: **{selected_template[1]}** | Type: {selected_template[3]} | Created: {selected_template[4]}")
-            edited_content = st_quill(value=selected_template[2], key=f"edit_template_{selected_template[0]}")
-            if st.button("Update Template", key=f"update_template_btn_{selected_template[0]}"):
-                database.update_template(selected_template[0], selected_template[1], edited_content)
+            st.write(f"Editing: **{selected_template['name']}** | Type: {selected_template['document_type']} | Created: {selected_template['created_at']}")
+            edited_content = st_quill(value=selected_template['content'], key=f"edit_template_{selected_template['id']}")
+            if st.button("Update Template", key=f"update_template_btn_{selected_template['id']}"):
+                requests.put(f"{API_URL}/templates/{selected_template['id']}", json={"name": selected_template['name'], "content": edited_content})
                 st.success("Template updated successfully!")
                 st.rerun()
 
 def knowledge_base_page():
     st.header("Knowledge Base Management")
 
-    # Initialize vector_store in session state if not present
-    if 'vector_store' not in st.session_state:
-        st.session_state.vector_store = None
+    # --- Knowledge Base Status ---
+    kb_status_response = requests.get(f"{API_URL}/knowledge_base/status").json()
+    if kb_status_response.get("status") == "ready":
+        st.success("Knowledge Base is Ready")
+    else:
+        st.warning("Knowledge Base is not Ready. Please upload documents to create it.")
 
-    # Attempt to load existing knowledge base on page load
-    if st.session_state.vector_store is None:
-        try:
-            # Try to load an existing collection without adding new data initially
-            # This requires a slight modification or a new function in knowledge_base.py
-            # For now, we'll assume create_and_store_embeddings can handle loading empty chunks
-            # if the collection already exists.
-            st.session_state.vector_store = knowledge_base.create_and_store_embeddings(chunks=[])
-            st.success("Existing knowledge base loaded.")
-        except Exception as e:
-            st.info(f"No existing knowledge base found or error loading: {e}. Please create one.")
-            st.session_state.vector_store = None
+    # --- File and URL Uploader ---
+    st.subheader("Upload Content")
+    uploaded_files = st.file_uploader(
+        "Upload PDF or Markdown files", 
+        accept_multiple_files=True, 
+        type=['pdf', 'md', 'txt']
+    )
+    urls_input = st.text_area("Enter URLs to scrape (one per line)")
 
-    # --- KNOWLEDGE BASE CREATION / UPDATE ---
-    st.subheader("Knowledge Base Content")
-    st.write("Upload documents and/or scrape websites to build or update your knowledge base.")
-    
-    uploaded_files = st.file_uploader("Upload PDFs and Markdown files", accept_multiple_files=True, type=['pdf', 'md'], key="kb_uploader")
-    
-    if uploaded_files:
-        # Save uploaded files to the upload directory
-        for uploaded_file in uploaded_files:
-            file_path = os.path.join(config.UPLOAD_DIRECTORY, uploaded_file.name)
-            with open(file_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
-        st.success(f"{len(uploaded_files)} file(s) ready for processing.")
+    if st.button("Create/Update Knowledge Base"):
+        if not uploaded_files and not urls_input:
+            st.warning("Please upload files or enter URLs to update the knowledge base.")
+        else:
+            with st.spinner("Processing content and updating knowledge base..."):
+                # 1. Upload files
+                if uploaded_files:
+                    files_to_upload = [("files", (file.name, file.getvalue(), file.type)) for file in uploaded_files]
+                    upload_response = requests.post(f"{API_URL}/knowledge_base/upload", files=files_to_upload)
+                    if upload_response.status_code != 200:
+                        st.error(f"Error uploading files: {upload_response.text}")
+                        return
 
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        if st.button("Create/Update Knowledge Base", key="create_update_kb_btn"):
-            with st.spinner("Processing content and updating knowledge base... This may take a while."):
-                # 1. Scrape websites
-                scraped_text = knowledge_base.scrape_websites(config.WEBSITES_TO_SCRAPE)
+                # 2. Trigger update
+                urls = [url.strip() for url in urls_input.split('\n') if url.strip()]
+                update_response = requests.post(f"{API_URL}/knowledge_base/update", json={"urls": urls})
                 
-                # 2. Process uploaded files
-                uploaded_text = knowledge_base.process_uploaded_files(config.UPLOAD_DIRECTORY)
-                
-                # 3. Combine text
-                full_text = scraped_text + uploaded_text
-                
-                # 4. Chunk text
-                chunks = knowledge_base.chunk_text(full_text)
-                
-                # 5. Create/Update and store embeddings
-                if st.session_state.vector_store is None:
-                    st.session_state.vector_store = knowledge_base.create_and_store_embeddings(chunks)
-                    st.success("Knowledge base created successfully!")
+                if update_response.status_code == 200:
+                    st.success(update_response.json()['message'])
                 else:
-                    st.session_state.vector_store = knowledge_base.update_embeddings(chunks)
-                    st.success("Knowledge base updated successfully!")
+                    st.error(f"Error updating knowledge base: {update_response.text}")
 
-    with col2:
-        if st.button("Reset Knowledge Base", key="reset_kb_btn"):
-            if st.session_state.vector_store is not None:
-                with st.spinner("Resetting knowledge base..."):
-                    knowledge_base.reset_knowledge_base()
-                    st.session_state.vector_store = None
-                    st.success("Knowledge base reset successfully!")
-                    st.rerun()
+    # --- Reset Knowledge Base ---
+    st.subheader("Manage Knowledge Base")
+    if st.button("Reset Knowledge Base"):
+        with st.spinner("Resetting knowledge base..."):
+            response = requests.post(f"{API_URL}/knowledge_base/reset")
+            if response.status_code == 200:
+                st.success("Knowledge base reset successfully!")
+                st.rerun()
             else:
-                st.info("No knowledge base to reset.")
+                st.error(f"Error resetting knowledge base: {response.text}")
 
     st.markdown("---")
 
     # --- CHAT INTERFACE ---
     st.subheader("Chat with your Knowledge Base")
 
-    if st.session_state.vector_store is None:
-        st.warning("Please create or update the knowledge base to enable chat functionality.")
-    else:
-        if 'chat_history' not in st.session_state:
-            st.session_state.chat_history = []
+    if 'chat_history' not in st.session_state:
+        st.session_state.chat_history = []
 
-        for message in st.session_state.chat_history:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
+    for message in st.session_state.chat_history:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
 
-        if prompt := st.chat_input("Ask a question to the knowledge base"):
-            st.session_state.chat_history.append({"role": "user", "content": prompt})
-            with st.chat_message("user"):
-                st.markdown(prompt)
+    if prompt := st.chat_input("Ask a question to the knowledge base"):
+        st.session_state.chat_history.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
 
-            with st.chat_message("assistant"):
-                with st.spinner("Thinking..."):
-                    # 1. Query the knowledge base
-                    docs = knowledge_base.query_knowledge_base(prompt, st.session_state.vector_store)
-                    
-                    # 2. Get answer from LLM
-                    response = knowledge_base.get_answer_from_llm(prompt, docs)
-                    
-                    st.markdown(response)
-            
-            st.session_state.chat_history.append({"role": "assistant", "content": response})
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                response = requests.post(f"{API_URL}/knowledge_base/query", json={"query": prompt})
+                if response.status_code == 200:
+                    st.markdown(response.json()['answer'])
+                    st.session_state.chat_history.append({"role": "assistant", "content": response.json()['answer']})
+                else:
+                    st.error(f"Error querying knowledge base: {response.text}")
 
 def team_tab(project_id):
     st.subheader("Team Members")
     
     with st.expander("Add New Team Member"):
         with st.form("new_team_member_form", clear_on_submit=True):
-            users = database.get_all_users()
-            user_map = {u[1]: u[0] for u in users}
+            users = requests.get(f"{API_URL}/users").json()
+            user_map = {u['username']: u['id'] for u in users}
             selected_user = st.selectbox("Select User", list(user_map.keys()))
             submitted = st.form_submit_button("Add Member")
             if submitted:
                 user_id = user_map[selected_user]
-                database.add_team_member(user_id, project_id)
+                requests.post(f"{API_URL}/team_members", json={"user_id": user_id, "project_id": project_id})
                 st.success("Team member added!")
                 st.rerun()
 
-    team_members = database.get_team_members(project_id)
+    team_members = requests.get(f"{API_URL}/team_members/{project_id}").json()
     if team_members:
         st.write("#### Current Team Members")
-        df = pd.DataFrame(team_members, columns=['ID', 'Username', 'Email'])
+        df = pd.DataFrame(team_members)
         
-        # Add a 'Delete' column with buttons
         for i, row in df.iterrows():
             col1, col2, col3, col4 = st.columns([0.5, 2, 2, 1])
             with col1:
-                st.write(row['ID'])
+                st.write(row['id'])
             with col2:
-                st.write(row['Username'])
+                st.write(row['username'])
             with col3:
-                st.write(row['Email'])
+                st.write(row['email'])
             with col4:
-                if st.button("Delete", key=f"delete_team_member_{row['ID']}_{project_id}"):
-                    database.delete_team_member(row['ID'], project_id)
-                    st.success(f"Team member {row['Username']} deleted.")
+                if st.button("Delete", key=f"delete_team_member_{row['id']}_{project_id}"):
+                    requests.delete(f"{API_URL}/team_members/{project_id}/{row['id']}")
+                    st.success(f"Team member {row['username']} deleted.")
                     st.rerun()
     else:
         st.info("No team members in this project yet.")
 
-
 def traceability_tab(project_id):
     st.subheader("Traceability Matrix")
-    traceability_links = database.get_traceability(project_id)
+    traceability_links = requests.get(f"{API_URL}/traceability/{project_id}").json()
     if traceability_links:
-        df = pd.DataFrame(traceability_links, columns=['ID', 'Project ID', 'Requirement Reference', 'Design Reference', 'Test Reference'])
-        st.dataframe(df[['Requirement Reference', 'Design Reference', 'Test Reference']])
+        df = pd.DataFrame(traceability_links)
+        st.dataframe(df[['requirement_ref', 'design_ref', 'test_ref']])
     else:
         st.info("No traceability links recorded for this project yet.")
 
@@ -634,7 +588,7 @@ def traceability_tab(project_id):
             test_ref = st.text_input("Test Reference")
             submitted = st.form_submit_button("Add Trace")
             if submitted:
-                database.add_traceability(project_id, req_ref, design_ref, test_ref)
+                requests.post(f"{API_URL}/traceability", json={"project_id": project_id, "requirement_ref": req_ref, "design_ref": design_ref, "test_ref": test_ref})
                 st.success("Traceability link added!")
                 st.rerun()
 
@@ -643,10 +597,10 @@ def hazard_traceability_tab(project_id):
     hazard_assessment_type = st.selectbox("Select Hazard Assessment Type", ["Medical (IEC 62304)", "Automotive (ISO 26262)", "General (IEC 61508)"])
 
     if hazard_assessment_type == "Medical (IEC 62304)":
-        hazard_links = database.get_hazard_traceability(project_id)
+        hazard_links = requests.get(f"{API_URL}/hazards/medical/{project_id}").json()
         if hazard_links:
-            df = pd.DataFrame(hazard_links, columns=['ID', 'Project ID', 'Hazard/Failure', 'Cause', 'Effect', 'Control Measures', 'Verification Notes', 'Severity', 'Occurrence', 'Detection', 'Mitigation Notes'])
-            st.data_editor(df[['Hazard/Failure', 'Cause', 'Effect', 'Control Measures', 'Verification Notes', 'Severity', 'Occurrence', 'Detection', 'Mitigation Notes']])
+            df = pd.DataFrame(hazard_links)
+            st.data_editor(df[['hazard', 'cause', 'effect', 'risk_control_measure', 'verification', 'severity', 'occurrence', 'detection', 'mitigation_notes']])
         else:
             st.info("No hazard traceability links recorded for this project yet.")
 
@@ -663,191 +617,121 @@ def hazard_traceability_tab(project_id):
                 mitigation_notes = st.text_area("Mitigation Notes")
                 submitted = st.form_submit_button("Add Hazard")
                 if submitted:
-                    database.add_hazard_traceability(project_id, hazard, cause, effect, risk_control, verification, sev, occ, det, mitigation_notes)
+                    requests.post(f"{API_URL}/hazards/medical", json={"project_id": project_id, "hazard": hazard, "cause": cause, "effect": effect, "risk_control_measure": risk_control, "verification": verification, "severity": sev, "occurrence": occ, "detection": det, "mitigation_notes": mitigation_notes})
                     st.success("Hazard traceability link added!")
                     st.rerun()
     
     elif hazard_assessment_type == "Automotive (ISO 26262)":
         st.subheader("ASIL Determination")
-        asil_entries = database.get_asil_entries(project_id)
+        asil_entries = requests.get(f"{API_URL}/hazards/automotive/{project_id}").json()
         if asil_entries:
-            df = pd.DataFrame(asil_entries, columns=['ID', 'Project ID', 'Hazard Description', 'Severity', 'Exposure', 'Controllability', 'ASIL Rating'])
-            st.dataframe(df[['Hazard Description', 'Severity', 'Exposure', 'Controllability', 'ASIL Rating']])
+            df = pd.DataFrame(asil_entries)
+            st.dataframe(df[['hazard_description', 'severity', 'exposure', 'controllability', 'asil_rating']])
         else:
             st.info("No ASIL entries recorded for this project yet.")
 
         with st.expander("Add New ASIL Entry"):
             with st.form("new_asil_form", clear_on_submit=True):
                 hazard_desc = st.text_input("Hazard Description")
-                sev = st.selectbox("Severity", options=list(config.ASIL_SEVERITY.keys()))
-                exp = st.selectbox("Exposure", options=list(config.ASIL_EXPOSURE.keys()))
-                con = st.selectbox("Controllability", options=list(config.ASIL_CONTROLLABILITY.keys()))
+                sev_options = requests.get(f"{API_URL}/options/hazards/automotive/severity").json()
+                sev = st.selectbox("Severity", options=sev_options)
+                exp_options = requests.get(f"{API_URL}/options/hazards/automotive/exposure").json()
+                exp = st.selectbox("Exposure", options=exp_options)
+                con_options = requests.get(f"{API_URL}/options/hazards/automotive/controllability").json()
+                con = st.selectbox("Controllability", options=con_options)
                 submitted = st.form_submit_button("Calculate and Add ASIL")
                 if submitted:
-                    asil_rating = config.ASIL_RATING_TABLE.get(config.ASIL_SEVERITY[sev] + config.ASIL_EXPOSURE[exp] + config.ASIL_CONTROLLABILITY[con], "QM")
-                    database.add_asil_entry(project_id, hazard_desc, sev, exp, con, asil_rating)
-                    st.success("ASIL entry added!")
+                    response = requests.post(f"{API_URL}/hazards/automotive", json={"project_id": project_id, "hazard_description": hazard_desc, "severity": sev, "exposure": exp, "controllability": con})
+                    if response.status_code == 200 and 'application/json' in response.headers.get('Content-Type', ''):
+                        asil_rating = response.json().get('asil_rating')
+                        if asil_rating:
+                            st.success(f"ASIL entry added with rating: {asil_rating}!")
+                        else:
+                            st.error("Failed to retrieve ASIL rating from response.")
+                    else:
+                        st.error(f"Failed to add ASIL entry. Status: {response.status_code}, Response: {response.text}")
                     st.rerun()
 
     elif hazard_assessment_type == "General (IEC 61508)":
         st.subheader("SIL Determination")
-        sil_entries = database.get_sil_entries(project_id)
+        sil_entries = requests.get(f"{API_URL}/hazards/general/{project_id}").json()
         if sil_entries:
-            df = pd.DataFrame(sil_entries, columns=['ID', 'Project ID', 'Hazard Description', 'Consequence', 'Exposure', 'Avoidance', 'Probability', 'SIL Rating'])
-            st.dataframe(df[['Hazard Description', 'Consequence', 'Exposure', 'Avoidance', 'Probability', 'SIL Rating']])
+            df = pd.DataFrame(sil_entries)
+            st.dataframe(df[['hazard_description', 'consequence', 'exposure', 'avoidance', 'probability', 'sil_rating']])
         else:
             st.info("No SIL entries recorded for this project yet.")
 
         with st.expander("Add New SIL Entry"):
             with st.form("new_sil_form", clear_on_submit=True):
                 hazard_desc = st.text_input("Hazard Description")
-                cons = st.selectbox("Consequence", options=list(config.SIL_CONSEQUENCE.keys()))
-                exp = st.selectbox("Exposure", options=list(config.SIL_EXPOSURE.keys()))
-                avo = st.selectbox("Avoidance", options=list(config.SIL_AVOIDANCE.keys()))
-                prob = st.selectbox("Probability", options=list(config.SIL_PROBABILITY.keys()))
+                cons_options = requests.get(f"{API_URL}/options/hazards/general/consequence").json()
+                cons = st.selectbox("Consequence", options=cons_options)
+                exp_options = requests.get(f"{API_URL}/options/hazards/general/exposure").json()
+                exp = st.selectbox("Exposure", options=exp_options)
+                avo_options = requests.get(f"{API_URL}/options/hazards/general/avoidance").json()
+                avo = st.selectbox("Avoidance", options=avo_options)
+                prob_options = requests.get(f"{API_URL}/options/hazards/general/probability").json()
+                prob = st.selectbox("Probability", options=prob_options)
                 submitted = st.form_submit_button("Calculate and Add SIL")
                 if submitted:
-                    sil_rating = config.SIL_RATING_TABLE.get(
-                        (config.SIL_PROBABILITY[prob], config.SIL_CONSEQUENCE[cons], config.SIL_EXPOSURE[exp], config.SIL_AVOIDANCE[avo]),
-                        "Invalid"
-                    )
-                    database.add_sil_entry(project_id, hazard_desc, cons, exp, avo, prob, sil_rating)
-                    st.success("SIL entry added!")
+                    response = requests.post(f"{API_URL}/hazards/general", json={"project_id": project_id, "hazard_description": hazard_desc, "consequence": cons, "exposure": exp, "avoidance": avo, "probability": prob})
+                    if response.status_code == 200 and 'application/json' in response.headers.get('Content-Type', ''):
+                        sil_rating = response.json().get('sil_rating')
+                        if sil_rating:
+                            st.success(f"SIL entry added with rating: {sil_rating}!")
+                        else:
+                            st.error("Failed to retrieve SIL rating from response.")
+                    else:
+                        st.error(f"Failed to add SIL entry. Status: {response.status_code}, Response: {response.text}")
                     st.rerun()
 
 def artifacts_tab(project_id):
     st.subheader("Approved Documents")
     
-    docs = database.get_documents(project_id)
-    approved_docs = [d for d in docs if d[6] == "Approved"]
+    docs = requests.get(f"{API_URL}/documents/project/{project_id}?status=Approved").json()
 
-    if not approved_docs:
+    if not docs:
         st.info("No approved documents yet.")
     else:
-        df = pd.DataFrame(approved_docs, columns=['id', 'project_id', 'doc_name', 'doc_type', 'content', 'version', 'status', 'created_at', 'updated_at'])
-        df['author'] = database.get_user_by_id(database.get_project_details(project_id)[3])
-        st.dataframe(df[['doc_name', 'doc_type', 'version', 'author', 'updated_at']])
+        df = pd.DataFrame(docs)
+        st.dataframe(df[['doc_name', 'doc_type', 'version', 'updated_at']])
 
         if st.button("Download All"):
-            zip_buffer = BytesIO()
-            with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
-                added, skipped = 0, 0
-                for index, row in df.iterrows():
-                    pdf_data = utils.generate_pdf(json.loads(row['content']).get("content", ""))
-                    if pdf_data:
-                        zip_file.writestr(f"{row['doc_name']}_v{row['version']}.pdf", pdf_data)
-                        added += 1
-                    else:
-                        skipped += 1
-            
-            if skipped:
-                st.warning(f"{skipped} document(s) could not be converted to PDF and were skipped.")
+            zip_buffer = requests.get(f"{API_URL}/documents/project/{project_id}/download_all").content
             st.download_button(
                 label="Download All as ZIP",
-                data=zip_buffer.getvalue(),
-                file_name=f"{database.get_project_details(project_id)[1]}_Documents_{datetime.now().strftime('%Y%m%d')}.zip",
+                data=zip_buffer,
+                file_name=f"Project_{project_id}_Documents_{datetime.now().strftime('%Y%m%d')}.zip",
                 mime="application/zip"
             )
 
 def audit_tab(project_id):
     st.subheader("Audit")
 
-    project_details = database.get_project_details(project_id)
-    project_name = project_details[1] if project_details else "Unknown Project"
-
     if st.button("AI Assist"):
-        st.info("Starting AI Audit...")
-
-        # Create a unique audit reference number
-        audit_timestamp = datetime.now()
-        audit_reference = f"{project_name}-Audit-{audit_timestamp.strftime('%Y%m%d%H%M%S')}"
-
-        # Get approved documents
-        with st.spinner("Fetching approved documents..."):
-            docs = database.get_documents(project_id)
-            approved_docs = [d for d in docs if d[6] == "Approved"]
-            st.success(f"Found {len(approved_docs)} approved documents.")
-
-        if not approved_docs:
-            st.warning("No approved documents to audit.")
-            return
-
-        for doc in approved_docs:
-            doc_id, _, doc_name, doc_type, content_json, _, _, _, _ = doc
-            content_data = json.loads(content_json)
-            document_content = content_data.get("content", "")
-
-            with st.spinner(f"Auditing document: {doc_name}"):
-                # Prepare audit prep prompt
-                audit_prep_prompt = config.GENERAL_AI_PROMPTS["Audit Prep"].replace("[Document Type]", doc_type)
-
-                # Query knowledge base
-                st.info(f"Querying knowledge base for {doc_type} checklist...")
-                if 'vector_store' not in st.session_state:
-                    st.error("Knowledge base not created. Please create it in the Knowledge Base tab.")
-                    return
-                
-                knowledge_base_context_docs = knowledge_base.query_knowledge_base(audit_prep_prompt, st.session_state.vector_store)
-                knowledge_base_context = "\n".join([d.page_content for d in knowledge_base_context_docs])
-                utils.show_logs(audit_prep_prompt, knowledge_base_context)
-                st.success("Knowledge base query complete.")
-
-                # Prepare final prompt
-                user_query = config.GENERAL_AI_PROMPTS["Audit Query"]
-                final_prompt = f"""
-                **User Data:**
-                {document_content}
-
-                **Context:**
-                {knowledge_base_context}
-
-                **User Query:**
-                {user_query}
-                """
-
-                # Call LLM to get audit gaps
-                st.info("Analyzing document for audit gaps...")
-                gaps_response = ai_integration.llm_client_instance.generate_text(final_prompt)
-                utils.show_logs(final_prompt, gaps_response)
-                st.success("Document analysis complete.")
-
-                # Parse and store gaps
-                gaps = [gap.strip() for gap in gaps_response.split('\n') if gap.strip()]
-                for gap in gaps:
-                    database.add_audit_gap(project_id, audit_reference, doc_name, gap, "New", audit_timestamp, document_content, user_query, knowledge_base_context)
-
-        st.success("AI Audit complete!")
+        st.info("Audit Run with AI...")
+        response = requests.post(f"{API_URL}/audit/{project_id}")
+        if response.status_code == 200:
+            st.success("AI Audit complete!")
+        else:
+            st.error(f"Error starting audit: {response.text}")
 
     # Display audit gaps
     st.subheader("Audit Gaps")
     
-    audit_references = database.get_audit_references(project_id)
-    audit_references = [ref for ref in audit_references if ref is not None]
+    audit_references = requests.get(f"{API_URL}/audit/references/{project_id}").json()
     if audit_references:
-        # Sort audit references by timestamp descending
-        audit_references.sort(key=lambda x: datetime.strptime(x.split('-')[-1], '%Y%m%d%H%M%S'), reverse=True)
         selected_audit_reference = st.selectbox("Select Audit Reference", audit_references)
 
         if selected_audit_reference:
-            audit_gaps_data = database.get_audit_gaps_by_reference(project_id, selected_audit_reference)
+            audit_gaps_data = requests.get(f"{API_URL}/audit/gaps/{project_id}/{selected_audit_reference}").json()
             if audit_gaps_data:
-                audit_timestamp = audit_gaps_data[0][6] # Get timestamp from the first record
+                audit_timestamp = audit_gaps_data[0]['audit_timestamp']
                 st.write(f"**Audit Run Date/Time:** {audit_timestamp}")
 
-                df = pd.DataFrame(audit_gaps_data, columns=['ID', 'Project ID', 'Audit Reference', 'Document Name', 'Comments', 'Status', 'Audit Timestamp', 'User Data', 'User Query', 'Context'])
+                df = pd.DataFrame(audit_gaps_data)
                 
-                # Download button
-                markdown_report = ""
-                for index, row in df.iterrows():
-                    markdown_report += f"## Audit Gap #{row['ID']}\n\n"
-                    markdown_report += f"## Audit Gap #{row['ID']}\n\n"
-                    markdown_report += f"**Document Name:** {row['Document Name']}\n\n"
-                    markdown_report += f"**Audit Gap:** {row['Comments']}\n\n"
-                    markdown_report += f"**Status:** {row['Status']}\n\n"
-                    markdown_report += f"### User Data\n\n---\n{row["User Data"]}\n\n---"
-                    markdown_report += f"### User Query\n\n---\n{row["User Query"]}\n\n---"
-                    markdown_report += f"### Context\n\n---\n{row["Context"]}\n\n---"
-
+                markdown_report = requests.get(f"{API_URL}/audit/report/{project_id}/{selected_audit_reference}").text
                 st.download_button(
                     label="Download Report",
                     data=markdown_report,
@@ -856,9 +740,9 @@ def audit_tab(project_id):
                 )
 
                 edited_df = st.data_editor(
-                    df[['Document Name', 'Comments', 'Status']], 
+                    df[['document_name', 'comments', 'status']], 
                     column_config={
-                        "Status": st.column_config.SelectboxColumn(
+                        "status": st.column_config.SelectboxColumn(
                             "Status",
                             options=["New", "In Progress", "Done"],
                             required=True,
@@ -866,7 +750,6 @@ def audit_tab(project_id):
                     },
                     use_container_width=True
                 )
-                # Here you would add logic to update the database with the edited data
     else:
         st.info("No audit gaps found.")
 
@@ -878,85 +761,73 @@ def training_tab(project_id):
 
     if st.session_state.get('ai_training_assist'):
         with st.expander("AI Training Assist", expanded=True):
-            prompt = st.text_area("Prompt", value=config.GENERAL_AI_PROMPTS['Training'], key=f"training_prompt_{project_id}")
+            default_prompt = requests.get(f"{API_URL}/prompts/training").json()['prompt']
+            user_prompt = st.text_area("Review and edit the prompt for generating questions:", value=default_prompt, height=150, key=f"training_prompt_editor_{project_id}")
+
             if st.button("Generate Questions", key=f"generate_training_questions_{project_id}"):
                 with st.spinner("Generating training questions..."):
-                    if 'vector_store' not in st.session_state:
-                        st.error("Knowledge base not created. Please create it in the Knowledge Base tab.")
-                        return
-                    
-                    knowledge_base_context_docs = knowledge_base.query_knowledge_base(prompt, st.session_state.vector_store)
-                    knowledge_base_context = "\n".join([d.page_content for d in knowledge_base_context_docs])
-                    
-                    response = ai_integration.llm_client_instance.generate_text(f"Context:\n{knowledge_base_context}\n\nTask: {prompt}")
-                    questions = response.strip().split('\n')
-                    for q in questions:
-                        if '(True)' in q:
-                            question = q.replace('(True)', '').strip()
-                            answer = 'True'
-                        elif '(False)' in q:
-                            question = q.replace('(False)', '').strip()
-                            answer = 'False'
-                        else:
-                            continue
-                        database.add_training_question(project_id, question, answer, st.session_state['user_info'][0])
-                    st.session_state.ai_training_assist = False
-                    st.rerun()
+                    response = requests.post(f"{API_URL}/training/generate", json={"project_id": project_id, "user_id": st.session_state['user_info'][0], "prompt": user_prompt})
+                    if response.status_code == 200:
+                        st.session_state.ai_training_assist = False
+                        st.rerun()
+                    else:
+                        st.error(f"Error generating questions: {response.text}")
 
-    questions_to_answer = database.get_training_questions(project_id, st.session_state['user_info'][0])
+    questions_to_answer = requests.get(f"{API_URL}/training/questions/{project_id}/{st.session_state['user_info'][0]}").json()
     if questions_to_answer:
         with st.form(key=f"training_form_{project_id}"):
             answers = {}
             for q in questions_to_answer:
-                answers[q[0]] = st.radio(q[2], ["True", "False"], key=f"q_{q[0]}")
+                answers[q['id']] = st.radio(q['question'], ["True", "False"], key=f"q_{q['id']}")
             
             submitted = st.form_submit_button("Submit Answers")
             if submitted:
                 for q_id, answer in answers.items():
-                    database.update_training_answer(q_id, answer)
+                    requests.put(f"{API_URL}/training/answer/{q_id}", json={"user_answer": answer})
                 st.rerun()
 
     st.subheader("Training History")
-    training_history = database.get_training_history(project_id, st.session_state['user_info'][0])
+    training_history = requests.get(f"{API_URL}/training/history/{project_id}/{st.session_state['user_info'][0]}").json()
     if training_history:
-        df = pd.DataFrame(training_history, columns=['ID', 'Project ID', 'Question', 'User Answer', 'Actual Answer', 'User ID', 'Timestamp'])
-        df['Correct'] = df['User Answer'] == df['Actual Answer']
-        st.dataframe(df[['Timestamp', 'Question', 'User Answer', 'Actual Answer', 'Correct']])
+        df = pd.DataFrame(training_history)
+        df['correct'] = df['user_answer'] == df['actual_answer']
+        st.dataframe(df[['timestamp', 'question', 'user_answer', 'actual_answer', 'correct']])
         
-        total_correct = df['Correct'].sum()
+        total_correct = df['correct'].sum()
         total_questions = len(df)
         st.metric("Overall Score", f"{total_correct}/{total_questions} ({total_correct/total_questions:.2%})")
     else:
         st.info("No training history yet.")
 
-
 def reviews_tab(project_id):
     st.subheader("Reviews")
-    review_choice = st.radio("", ["My Reviews", "All Reviews"])
+    review_choice = st.radio("Select Review Type", ["My Reviews", "All Reviews"])
 
     if review_choice == "My Reviews":
-        reviews = database.get_reviews_for_user(st.session_state['user_info'][0])
+        reviews = requests.get(f"{API_URL}/reviews/user/{st.session_state['user_info'][0]}").json()
         if not reviews:
             st.info("You have no documents to review.")
         else:
             with st.expander("Review Items", expanded=True):
-                review_options = {f"{r[1]} (v{database.get_document_details(r[0])[5]}) - Status: {r[3]}" : r[0] for r in reviews}
+                review_options = {f"{r['doc_name']} (v{r['version']}) - Status: {r['status']}" : r['document_id'] for r in reviews}
                 selected_review_label = st.selectbox("Select a review to comment on:", list(review_options.keys()))
 
                 if selected_review_label:
                     doc_id = review_options[selected_review_label]
-                    doc_details = database.get_document_details(doc_id)
+                    doc_details = requests.get(f"{API_URL}/documents/{doc_id}").json()
                     if doc_details:
-                        if doc_details[3] == "Code Review": # Check if it's a code review
-                            content_data = json.loads(doc_details[4])
+                        if doc_details['doc_type'] == "Code Review": # Check if it's a code review
+                            content_data = json.loads(doc_details['content'])
                             payload = content_data.get("content", {})
                             if isinstance(payload, str):
-                                try: payload = json.loads(payload)
-                                except: payload = {}
+                                try:
+                                    payload = json.loads(payload)
+                                except:
+                                    payload = {}
                             
                             raw_diff = payload.get("raw_diff")
                             if raw_diff:
-                                diff_html = utils.colorize_diff_to_html(raw_diff)
+                                diff_html = requests.post(f"{API_URL}/colorize_diff", json={"diff_text": raw_diff}).json()['html']
                                 st.components.v1.html(diff_html, height=600, scrolling=True)
                             else: # Fallback for old format
                                 code1 = payload.get("code1", "")
@@ -965,7 +836,7 @@ def reviews_tab(project_id):
                                 diff_html = d.make_table(code1.splitlines(), code2.splitlines())
                                 st.components.v1.html(diff_html, height=600, scrolling=True)
                         else:
-                            content_data = json.loads(doc_details[4])
+                            content_data = json.loads(doc_details['content'])
                             st.markdown(content_data.get("content", ""), unsafe_allow_html=True)
 
             if selected_review_label:
@@ -975,22 +846,22 @@ def reviews_tab(project_id):
                     new_status = st.selectbox("Status", ["Comment", "Approved", "Needs Revision"])
                     submit_review = st.form_submit_button("Submit Review")
                     if submit_review:
-                        database.add_review(doc_id, st.session_state['user_info'][0], comment, new_status)
+                        requests.post(f"{API_URL}/reviews", json={"document_id": doc_id, "reviewer_id": st.session_state['user_info'][0], "comments": comment, "status": new_status})
                         st.success("Your review has been submitted.")
                         st.rerun()
 
     elif review_choice == "All Reviews":
-        all_reviews = database.get_all_reviews_for_project(project_id)
+        all_reviews = requests.get(f"{API_URL}/reviews/project/{project_id}").json()
         if not all_reviews:
             st.info("No reviews for this project yet.")
         else:
-            df = pd.DataFrame(all_reviews, columns=['Review Item', 'Version', 'Date & Timestamp', 'Document Status', 'Reviewer', 'Comments'])
+            df = pd.DataFrame(all_reviews)
             st.dataframe(df)
 
 def admin_page():
     st.header("Admin Dashboard")
     st.subheader("Manage Users")
-    users = database.get_all_users()
+    users = requests.get(f"{API_URL}/users").json()
     df = pd.DataFrame(users, columns=['ID', 'Username', 'Is Admin'])
     st.dataframe(df)
 
@@ -1056,9 +927,12 @@ def help_page():
     *   **Create and Manage Templates**: Create reusable document templates to standardize your documentation process.
     *   **AI Template Generation**: Use the AI to generate new templates based on your requirements.
 
-    ### Configuration
+    ### Knowledge Base
 
-    *   **Knowledge Base**: Upload your own documents and/or scrape websites to create or update a local knowledge base for the RAG system. You can also reset the knowledge base.
+    *   **Upload Content**: Upload your own documents (PDF, Markdown, or text files) and/or scrape websites to create or update a local knowledge base for the RAG system.
+    *   **Chat**: Chat with your knowledge base to get answers to your questions.
+    *   **Status**: The status of the knowledge base is displayed at the top of the page. If it's not ready, you need to upload documents to create it.
+    *   **Reset**: You can reset the knowledge base, which will delete all the existing data.
 
     ### Admin
 

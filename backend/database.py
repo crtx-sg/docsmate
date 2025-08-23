@@ -2,6 +2,9 @@ import sqlite3
 import hashlib
 import json
 from datetime import datetime
+import os
+
+DB_PATH = '/app/data/db/docsmate.db'
 
 def make_hashes(password):
     return hashlib.sha256(str.encode(password)).hexdigest()
@@ -12,7 +15,9 @@ def check_hashes(password, hashed_text):
     return False
 
 def init_db():
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    # Ensure the directory exists
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
 
     # User table
@@ -30,9 +35,13 @@ def init_db():
     if 'email' not in columns:
         c.execute("ALTER TABLE users ADD COLUMN email TEXT UNIQUE")
 
-    c.execute("SELECT * FROM users WHERE username='aiuser'")
+    c.execute("SELECT * FROM users WHERE email='aiuser@docsmate.com'")
     if not c.fetchone():
-        add_user('aiuser', 'ai_password', 'aiuser@docsmate.com', is_admin=False)
+        try:
+            add_user('aiuser', 'ai_password', 'aiuser@docsmate.com', is_admin=False)
+        except sqlite3.IntegrityError:
+            # User already exists, ignore
+            pass
 
     # Projects table
     c.execute('''
@@ -228,14 +237,14 @@ def init_db():
     conn.close()
 
 def add_user(username, password, email, is_admin=False):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute('INSERT INTO users (username, password_hash, email, is_admin) VALUES (?,?,?,?)', (username, make_hashes(password), email, is_admin))
     conn.commit()
     conn.close()
 
 def login_user(email, password):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute('SELECT * FROM users WHERE email =?', (email,))
     data = c.fetchone()
@@ -247,7 +256,7 @@ def login_user(email, password):
 def get_user_by_id(user_id):
     if user_id == 0:
         return "AI Assistant"
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute('SELECT username FROM users WHERE id =?', (user_id,))
     data = c.fetchone()
@@ -255,7 +264,7 @@ def get_user_by_id(user_id):
     return data[0] if data else "Unknown"
 
 def get_all_users():
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute('SELECT id, username, is_admin FROM users')
     data = c.fetchall()
@@ -263,14 +272,14 @@ def get_all_users():
     return data
 
 def create_project(name, description, user_id):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute('INSERT INTO projects (name, description, created_by_user_id) VALUES (?,?,?)', (name, description, user_id))
     conn.commit()
     conn.close()
 
 def get_projects():
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute('SELECT * FROM projects')
     data = c.fetchall()
@@ -278,7 +287,7 @@ def get_projects():
     return data
 
 def get_project_details(project_id):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute('SELECT * FROM projects WHERE id =?', (project_id,))
     data = c.fetchone()
@@ -286,21 +295,21 @@ def get_project_details(project_id):
     return data
 
 def update_project(project_id, name, description):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute('UPDATE projects SET name = ?, description = ? WHERE id = ?', (name, description, project_id))
     conn.commit()
     conn.close()
 
 def add_team_member(user_id, project_id):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute('INSERT INTO team_members (user_id, project_id) VALUES (?,?)', (user_id, project_id))
     conn.commit()
     conn.close()
 
 def get_team_members(project_id):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute('''SELECT u.id, u.username, u.email FROM users u JOIN team_members tm ON u.id = tm.user_id WHERE tm.project_id = ?''', (project_id,))
     data = c.fetchall()
@@ -308,14 +317,14 @@ def get_team_members(project_id):
     return data
 
 def delete_team_member(user_id, project_id):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute('DELETE FROM team_members WHERE user_id = ? AND project_id = ?', (user_id, project_id))
     conn.commit()
     conn.close()
 
 def create_document(project_id, item_name, doc_type, content, version=1, status='Draft'):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     now = datetime.now()
     c.execute('INSERT INTO documents (project_id, doc_name, doc_type, content, version, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)',
@@ -326,7 +335,7 @@ def create_document(project_id, item_name, doc_type, content, version=1, status=
     return doc_id
 
 def get_documents(project_id):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute('SELECT * FROM documents WHERE project_id =?', (project_id,))
     data = c.fetchall()
@@ -334,7 +343,7 @@ def get_documents(project_id):
     return data
     
 def get_document_details(doc_id):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute('SELECT * FROM documents WHERE id =?', (doc_id,))
     data = c.fetchone()
@@ -342,7 +351,8 @@ def get_document_details(doc_id):
     return data
 
 def update_document(doc_id, content, status, comments, author_id):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    print(f"[DEBUG] update_document called: doc_id={doc_id}, status={status}, comments={comments}, author_id={author_id}")
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     now = datetime.now()
     c.execute('UPDATE documents SET content =?, status = ?, updated_at =? WHERE id =?', (json.dumps({"content": content}), status, now, doc_id))
@@ -352,7 +362,7 @@ def update_document(doc_id, content, status, comments, author_id):
     conn.close()
 
 def add_risk(project_id, failure_mode, severity, occurrence, detection, rpn, comments, status='New'):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute('INSERT INTO risks (project_id, failure_mode, severity, occurrence, detection, rpn, comments, status) VALUES (?,?,?,?,?,?,?,?)',
               (project_id, failure_mode, severity, occurrence, detection, rpn, comments, status))
@@ -360,7 +370,7 @@ def add_risk(project_id, failure_mode, severity, occurrence, detection, rpn, com
     conn.close()
 
 def get_risks(project_id):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute('SELECT * FROM risks WHERE project_id =?', (project_id,))
     data = c.fetchall()
@@ -368,7 +378,7 @@ def get_risks(project_id):
     return data
 
 def add_traceability(project_id, requirement_ref, design_ref, test_ref):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute('INSERT INTO traceability (project_id, requirement_ref, design_ref, test_ref) VALUES (?,?,?,?)',
               (project_id, requirement_ref, design_ref, test_ref))
@@ -376,7 +386,7 @@ def add_traceability(project_id, requirement_ref, design_ref, test_ref):
     conn.close()
 
 def get_traceability(project_id):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute('SELECT * FROM traceability WHERE project_id =?', (project_id,))
     data = c.fetchall()
@@ -384,7 +394,7 @@ def get_traceability(project_id):
     return data
 
 def add_review(document_id, reviewer_id, comments, status):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute('INSERT INTO reviews (document_id, reviewer_id, comments, status) VALUES (?,?,?,?)',
               (document_id, reviewer_id, comments, status))
@@ -395,7 +405,7 @@ def add_review(document_id, reviewer_id, comments, status):
     conn.close()
 
 def get_reviews_for_document(document_id):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute('''
         SELECT r.comments, r.status, CASE WHEN r.reviewer_id = 0 THEN 'AI Assistant' ELSE u.username END
@@ -408,7 +418,7 @@ def get_reviews_for_document(document_id):
     return data
 
 def create_template(name, content, doc_type):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     now = datetime.now()
     c.execute('INSERT INTO templates (name, content, document_type, created_at) VALUES (?,?,?,?)', (name, content, doc_type, now))
@@ -416,7 +426,7 @@ def create_template(name, content, doc_type):
     conn.close()
 
 def get_templates():
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute('SELECT * FROM templates')
     data = c.fetchall()
@@ -424,7 +434,7 @@ def get_templates():
     return data
 
 def get_template_details(template_id):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute('SELECT * FROM templates WHERE id = ?', (template_id,))
     data = c.fetchone()
@@ -432,14 +442,14 @@ def get_template_details(template_id):
     return data
 
 def update_template(template_id, name, content):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute('UPDATE templates SET name = ?, content = ? WHERE id = ?', (name, content, template_id))
     conn.commit()
     conn.close()
 
 def add_hazard_traceability(project_id, hazard, cause, effect, risk_control_measure, verification, severity, occurrence, detection, mitigation_notes):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute('INSERT INTO hazard_traceability (project_id, hazard, cause, effect, risk_control_measure, verification, severity, occurrence, detection, mitigation_notes) VALUES (?,?,?,?,?,?,?,?,?,?)',
               (project_id, hazard, cause, effect, risk_control_measure, verification, severity, occurrence, detection, mitigation_notes))
@@ -447,7 +457,7 @@ def add_hazard_traceability(project_id, hazard, cause, effect, risk_control_meas
     conn.close()
 
 def get_hazard_traceability(project_id):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute('SELECT * FROM hazard_traceability WHERE project_id =?', (project_id,))
     data = c.fetchall()
@@ -455,9 +465,10 @@ def get_hazard_traceability(project_id):
     return data
 
 def add_revision_history(doc_id, status, author_id, comments, db_cursor=None):
+    print(f"[DEBUG] add_revision_history called: doc_id={doc_id}, status={status}, author_id={author_id}, comments={comments}")
     conn = None
     if not db_cursor:
-        conn = sqlite3.connect('docsmate.db', timeout=15)
+        conn = sqlite3.connect(DB_PATH, timeout=15)
         db_cursor = conn.cursor()
     
     now = datetime.now()
@@ -469,7 +480,7 @@ def add_revision_history(doc_id, status, author_id, comments, db_cursor=None):
         conn.close()
 
 def get_revision_history(doc_id):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute('SELECT * FROM revision_history WHERE doc_id =?', (doc_id,))
     data = c.fetchall()
@@ -477,7 +488,7 @@ def get_revision_history(doc_id):
     return data
 
 def add_asil_entry(project_id, hazard_desc, severity, exposure, controllability, asil_rating):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute('INSERT INTO asil_master (project_id, hazard_description, severity, exposure, controllability, asil_rating) VALUES (?,?,?,?,?,?)',
               (project_id, hazard_desc, severity, exposure, controllability, asil_rating))
@@ -485,7 +496,7 @@ def add_asil_entry(project_id, hazard_desc, severity, exposure, controllability,
     conn.close()
 
 def get_asil_entries(project_id):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute('SELECT * FROM asil_master WHERE project_id =?', (project_id,))
     data = c.fetchall()
@@ -493,7 +504,7 @@ def get_asil_entries(project_id):
     return data
 
 def add_sil_entry(project_id, hazard_desc, consequence, exposure, avoidance, probability, sil_rating):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute('INSERT INTO sil_master (project_id, hazard_description, consequence, exposure, avoidance, probability, sil_rating) VALUES (?,?,?,?,?,?,?)',
               (project_id, hazard_desc, consequence, exposure, avoidance, probability, sil_rating))
@@ -501,7 +512,7 @@ def add_sil_entry(project_id, hazard_desc, consequence, exposure, avoidance, pro
     conn.close()
 
 def get_sil_entries(project_id):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute('SELECT * FROM sil_master WHERE project_id =?', (project_id,))
     data = c.fetchall()
@@ -509,7 +520,7 @@ def get_sil_entries(project_id):
     return data
 
 def add_audit_gap(project_id, audit_reference, document_name, comments, status, timestamp, user_data, user_query, context):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute("INSERT INTO audit_gaps (project_id, audit_reference, document_name, comments, status, audit_timestamp, user_data, user_query, context) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
               (project_id, audit_reference, document_name, comments, status, timestamp, user_data, user_query, context))
@@ -517,7 +528,7 @@ def add_audit_gap(project_id, audit_reference, document_name, comments, status, 
     conn.close()
 
 def get_audit_gaps(project_id):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute("SELECT id, project_id, audit_reference, document_name, comments, status, audit_timestamp, user_data, user_query, context FROM audit_gaps WHERE project_id = ?", (project_id,))
     data = c.fetchall()
@@ -525,7 +536,7 @@ def get_audit_gaps(project_id):
     return data
 
 def get_audit_references(project_id):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute("SELECT DISTINCT audit_reference FROM audit_gaps WHERE project_id = ?", (project_id,))
     data = [row[0] for row in c.fetchall()]
@@ -533,7 +544,7 @@ def get_audit_references(project_id):
     return data
 
 def get_audit_gaps_by_reference(project_id, audit_reference):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute("SELECT id, project_id, audit_reference, document_name, comments, status, audit_timestamp, user_data, user_query, context FROM audit_gaps WHERE project_id = ? AND audit_reference = ?", (project_id, audit_reference))
     data = c.fetchall()
@@ -541,7 +552,7 @@ def get_audit_gaps_by_reference(project_id, audit_reference):
     return data
 
 def add_training_question(project_id, question, actual_answer, user_id):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     now = datetime.now()
     c.execute('INSERT INTO training (project_id, question, actual_answer, user_id, timestamp) VALUES (?,?,?,?,?)',
@@ -550,7 +561,7 @@ def add_training_question(project_id, question, actual_answer, user_id):
     conn.close()
 
 def get_training_questions(project_id, user_id):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute('SELECT * FROM training WHERE project_id =? AND user_id =? AND user_answer IS NULL', (project_id, user_id))
     data = c.fetchall()
@@ -558,14 +569,14 @@ def get_training_questions(project_id, user_id):
     return data
 
 def update_training_answer(question_id, user_answer):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute('UPDATE training SET user_answer =? WHERE id =?', (user_answer, question_id))
     conn.commit()
     conn.close()
 
 def get_training_history(project_id, user_id):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute('SELECT * FROM training WHERE project_id =? AND user_id =? AND user_answer IS NOT NULL', (project_id, user_id))
     data = c.fetchall()
@@ -573,10 +584,10 @@ def get_training_history(project_id, user_id):
     return data
 
 def get_reviews_for_user(user_id):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute('''
-        SELECT d.id, d.doc_name, p.name, r.status
+        SELECT d.id, d.doc_name, d.version, p.name, r.status
         FROM documents d
         JOIN reviews r ON d.id = r.document_id
         JOIN projects p ON d.project_id = p.id
@@ -587,7 +598,7 @@ def get_reviews_for_user(user_id):
     return data
 
 def get_review_history(user_id):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute('''
         SELECT d.doc_name, d.version, r.timestamp, r.status, r.comments
@@ -600,7 +611,7 @@ def get_review_history(user_id):
     return data
 
 def get_all_reviews_for_project(project_id):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute('''
         SELECT d.doc_name, d.version, r.timestamp, r.status, u.username, r.comments
@@ -614,7 +625,7 @@ def get_all_reviews_for_project(project_id):
     return data
 
 def get_user_accessible_projects(user_id):
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     
     # Projects created by the user
@@ -647,7 +658,7 @@ def get_user_accessible_projects(user_id):
     return list(all_projects.values())
 
 def migrate_code_review_content():
-    conn = sqlite3.connect('docsmate.db', timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     c = conn.cursor()
     c.execute("SELECT id, content FROM documents WHERE doc_type='Code Review'")
     rows = c.fetchall()

@@ -1,19 +1,43 @@
 services:
   backend:
-    build: .
-    command: ["python", "-m", "uvicorn", "backend:app", "--host", "0.0.0.0", "--port", "8000"]
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     ports:
       - "8000:8000"
+    networks:
+      - docsmate-network
+    depends_on:
+      - ollama
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
     volumes:
-      - .:/app
+      - db_data:/app/data/db
+      - faiss_data:/app/faiss_index
 
   frontend:
-    build: .
-    command: ["python", "-m", "streamlit", "run", "app.py", "--server.port", "8501", "--server.address", "0.0.0.0"]
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
     ports:
       - "8501:8501"
-    volumes:
-      - .:/app
+    networks:
+      - docsmate-network
     depends_on:
       - backend
 
+  ollama:
+    image: ollama/ollama
+    container_name: docsmate-ollama
+    volumes:
+      - ./ollama-data:/root/.ollama
+    networks:
+      - docsmate-network
+
+networks:
+  docsmate-network:
+    driver: bridge
+
+volumes:
+  db_data:
+  faiss_data:

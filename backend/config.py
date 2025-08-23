@@ -119,7 +119,7 @@ SIL_RATING_TABLE = {
 LLM_PROVIDER = 'ollama'
 
 # Ollama Configuration
-OLLAMA_API_BASE_URL = 'http://localhost:11434' # Default Ollama API URL
+OLLAMA_API_BASE_URL = 'http://ollama:11434' # Default Ollama API URL
 OLLAMA_LLM_MODEL = "qwen2:7b"  # Specify the Ollama model to use
 OLLAMA_EMBEDDING_MODEL = "nomic-embed-text:latest" # Specify the Ollama model for embeddings
 
@@ -146,8 +146,7 @@ GROK_LLM_MODEL = "grok-1" # Example model
 
 # --- RAG CONFIGURATION ---
 RAG_LLM_PROVIDER = 'ollama'
-MILVUS_HOST = "localhost"
-MILVUS_PORT = "19530"
+FAISS_INDEX_PATH = "faiss_index"
 
 # --- KNOWLEDGE BASE & SCRAPING ---
 UPLOAD_DIRECTORY = "uploaded_files"

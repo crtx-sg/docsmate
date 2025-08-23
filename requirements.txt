@@ -7,9 +7,12 @@ uvicorn
 requests
 matplotlib
 ollama
-pymilvus
+faiss-cpu
+langchain-text-splitters
 beautifulsoup4
 lxml
 pypdf
 langchain
 langchain-community
+python-multipart
+gunicorn

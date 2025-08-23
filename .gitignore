@@ -1,4 +1,15 @@
 __pycache__/
-docsmate-env
+.docsmate-env
 docsmate.db
 uploaded_files
+etcd-data
+milvus-data
+minio-data
+ollama-data
+query.py
+test.txt
+update.py
+upload.py
+uploaded_files
+
+
